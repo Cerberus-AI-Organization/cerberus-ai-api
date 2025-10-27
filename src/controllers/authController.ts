@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 import {pool} from '../core/database';
 import {User} from '../types/user';
 
-const JWT_SECRET = process.env.JWT_SECRET || 'CerberusAI';
+const JWT_SECRET = process.env.JWT_SECRET!;
 
 export const login = async (req: Request, res: Response) => {
   const {email, password} = req.body;

@@ -32,10 +32,10 @@ export const listModels = async (req: Request, res: Response) => {
         const resp = await fetch(`${buildOllamaUrl(node)}/api/tags`);
         const data = await resp.json() as { models?: any[] };
 
-        res.json({ models: data.models?.map((model: any) => ({
+        res.json(data.models?.map((model: any) => ({
           name: model.name,
           size: model.size
-        }))});
+        })));
     } catch (err: any) {
         res.status(500).json({ error: err.message });
     }
@@ -101,25 +101,43 @@ export const pullModel = async (req: Request, res: Response) => {
 };
 
 export const deleteModel = async (req: Request, res: Response) => {
-    const currentUser = (req as any).user;
-    if (currentUser.role !== 'admin') {
-        return res.status(403).json({ message: 'Only admins can delete ollama models' });
+  const currentUser = (req as any).user;
+  if (currentUser.role !== 'admin') {
+    return res.status(403).json({message: 'Only admins can delete ollama models'});
+  }
+
+  try {
+    const {id, name} = req.params;
+    const node = await getNodeById(Number(id));
+
+    const status = await checkOnline(node.ip, node.port);
+    if (status === 'offline') {
+      return res.status(500).json({error: "Node is offline"});
     }
 
-    try {
-        const { id, name } = req.params;
-        const node = await getNodeById(Number(id));
+    const resp = await fetch(`${buildOllamaUrl(node)}/api/delete`, {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({name})
+    });
 
-        const status = await checkOnline(node.ip, node.port);
-        if (status === 'offline') {
-            return res.status(500).json({ error: "Node is offline" });
-        }
-
-        const resp = await fetch(`${buildOllamaUrl(node)}/api/models/${name}`, { method: "DELETE" });
-        res.json({ node: node.hostname, message: `Model ${name} deleted`, status: resp.status });
-    } catch (err: any) {
-        res.status(500).json({ error: err.message });
+    if (resp.status === 200) {
+      console.log(`✅ Deleted Ollama model '${name}' on node '${node.hostname}' [Status: ${resp.status}]`);
+      return res.json({
+        node: node.hostname,
+        message: `Model ${name} deleted or was already removed`,
+        status: resp.status
+      });
     }
+
+    return res.status(resp.status).json({
+      error: `Failed to delete model with status ${resp.status}`
+    });
+  } catch (err: any) {
+    res.status(500).json({error: err.message});
+  }
 };
 
 export const stopModel = async (req: Request, res: Response) => {

@@ -3,6 +3,32 @@ import { pool } from '../core/database';
 import bcrypt from 'bcrypt';
 import { User } from '../types/user';
 
+// GET user by ID
+export const getUser = async (req: Request, res: Response) => {
+  const currentUser = (req as any).user;
+  const {id} = req.params;
+
+  try {
+    if (currentUser.role !== 'admin' && parseInt(id) !== currentUser.id) {
+      return res.status(403).json({message: 'Not authorized to view this user'});
+    }
+
+    const result = await pool.query<User>(
+      'SELECT id, name, email, role FROM users WHERE id=$1',
+      [id]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({message: 'User not found'});
+    }
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({message: 'Error fetching user'});
+  }
+};
+
 // GET users
 export const getUsers = async (req: Request, res: Response) => {
     const user = (req as any).user;
@@ -23,6 +49,8 @@ export const getUsers = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error fetching users' });
     }
 };
+
+
 
 // ADD user (only admin)
 export const addUser = async (req: Request, res: Response) => {

@@ -1,103 +1,118 @@
 import fetch from "node-fetch";
-import { checkOnline } from "../controllers/computeNodeController";
-import { getNodeById, buildOllamaUrl } from "../controllers/ollamaController";
+import {checkOnline} from "../controllers/computeNodeController";
+import {getNodeById, buildOllamaUrl} from "../controllers/ollamaController";
 
 export interface OllamaMessage {
-    role: "user" | "assistant" | "system";
-    content: string;
+  role: "user" | "assistant" | "system";
+  content: string;
 }
 
 export async function runOllamaSync(
-    nodeId: number,
-    model: string,
-    session: string,
-    messages: OllamaMessage[]
+  nodeId: number,
+  model: string,
+  session: string,
+  messages: OllamaMessage[]
 ): Promise<{ content: string; done: boolean }> {
-    const node = await getNodeById(nodeId);
-    const status = await checkOnline(node.ip, node.port);
-    if (status === "offline") {
-        throw new Error("Node is offline");
-    }
+  const node = await getNodeById(nodeId);
+  const status = await checkOnline(node.ip, node.port);
+  if (status === "offline") {
+    throw new Error("Node is offline");
+  }
 
-    const response = await fetch(`${buildOllamaUrl(node)}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, session, messages }),
-    });
+  const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
 
-    if (!response.ok) {
-        throw new Error(`Ollama returned ${response.status}`);
-    }
+  const response = await fetch(`${buildOllamaUrl(node)}/api/chat`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      model,
+      session,
+      messages,
+      keep_alive
+    }),
+  });
 
-    if (!response.body) {
-        throw new Error("No response body from Ollama");
-    }
+  if (!response.ok) {
+    throw new Error(`Ollama returned ${response.status}`);
+  }
 
-    const text = await response.text();
-    const lines = text.trim().split('\n');
-    const parsed_lines = lines.map(line => JSON.parse(line));
-    const content = parsed_lines.map(line => line.message.content).join("")
+  if (!response.body) {
+    throw new Error("No response body from Ollama");
+  }
 
-    return { content: content, done: parsed_lines[parsed_lines.length - 1].done };
+  const text = await response.text();
+  const lines = text.trim().split('\n');
+  const parsed_lines = lines.map(line => JSON.parse(line));
+  const content = parsed_lines.map(line => line.message.content).join("")
+
+  return {content: content, done: parsed_lines[parsed_lines.length - 1].done};
 }
 
 export async function* runOllamaStream(
-    nodeId: number,
-    model: string,
-    session: string,
-    messages: OllamaMessage[]
+  nodeId: number,
+  model: string,
+  session: string,
+  messages: OllamaMessage[]
 ): AsyncGenerator<{ content: string; done: boolean }> {
-    const node = await getNodeById(nodeId);
-    const status = await checkOnline(node.ip, node.port);
+  const node = await getNodeById(nodeId);
+  const status = await checkOnline(node.ip, node.port);
 
-    if (status === "offline") {
-        throw new Error("Node is offline");
+  if (status === "offline") {
+    throw new Error("Node is offline");
+  }
+
+  const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
+
+  const response = await fetch(`${buildOllamaUrl(node)}/api/chat`, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      model,
+      session,
+      messages,
+      keep_alive,
+    }),
+  });
+
+  if (!response.body) {
+    throw new Error("No response body from Ollama");
+  }
+
+  let buffer = "";
+
+  for await (const chunk of response.body) {
+    buffer += chunk.toString();
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const parsed = JSON.parse(line);
+        yield {
+          content: parsed?.message?.content || "",
+          done: parsed?.done || false,
+        };
+      } catch (err) {
+        console.error("Parse error:", err);
+      }
     }
+  }
 
-    const response = await fetch(`${buildOllamaUrl(node)}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ model, session, messages }),
-    });
-
-    if (!response.body) {
-        throw new Error("No response body from Ollama");
+  if (buffer.trim()) {
+    try {
+      const parsed = JSON.parse(buffer);
+      yield {
+        content: parsed?.message?.content || "",
+        done: parsed?.done || false,
+      };
+    } catch {
     }
-
-    let buffer = "";
-
-    for await (const chunk of response.body) {
-        buffer += chunk.toString();
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-            if (!line.trim()) continue;
-            try {
-                const parsed = JSON.parse(line);
-                yield {
-                    content: parsed?.message?.content || "",
-                    done: parsed?.done || false,
-                };
-            } catch (err) {
-                console.error("Parse error:", err);
-            }
-        }
-    }
-
-    if (buffer.trim()) {
-        try {
-            const parsed = JSON.parse(buffer);
-            yield {
-                content: parsed?.message?.content || "",
-                done: parsed?.done || false,
-            };
-        } catch {}
-    }
+  }
 }
 
 export function getCerberusAISystemPrompt() {
-    return `
+  return `
         # 🛡️ CerberusAI – Advanced Cybersecurity Intelligence Assistant
         
         ## Role & Purpose

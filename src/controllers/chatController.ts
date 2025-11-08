@@ -2,7 +2,7 @@ import {Request, Response} from "express";
 import {pool} from "../core/database";
 import {checkOnline} from "./computeNodeController";
 import {getNodeById} from "./ollamaController";
-import {runOllamaStream} from "../core/ollama";
+import {runOllamaStream, runOllamaSync} from "../core/ollama";
 import {Message} from "../types/message";
 
 export const createChat = async (req: Request, res: Response) => {
@@ -87,28 +87,52 @@ export const postChatMessage = async (req: Request, res: Response) => {
       return res.status(500).json({error: "Node is offline"});
     }
 
-    const result = await pool.query(`SELECT *
-                                     FROM chat_users
-                                     WHERE chat_id = $1
-                                       AND user_id = $2`,
-      [id, user.id]);
-    if (result.rows.length === 0) {
-      return res.status(403).json({message: 'You are not authorized to send messages in this chat'});
-    }
-
     res.setHeader("Content-Type", "application/x-ndjson");
     res.setHeader("Transfer-Encoding", "chunked");
+
+    let chatId = id;
+    if (id != "-1") {
+      const result = await pool.query(`SELECT *
+                                       FROM chat_users
+                                       WHERE chat_id = $1
+                                         AND user_id = $2`,
+        [id, user.id]);
+      if (result.rows.length === 0) {
+        return res.status(403).json({message: 'You are not authorized to send messages in this chat'});
+      }
+    } else {
+      const chatTitleGenerated = await runOllamaSync(Number(node_id), model, `user-new-chat-${user.id}`, [
+        {role: "system", content: `Create a new chat title (max 5 words) from content and return it as a string. Return it in language of the user. Return only text not \"`},
+        {role: "user", content: content}
+      ]);
+
+      const chatResult = await pool.query(
+        `INSERT INTO chats (title, created_by)
+       VALUES ($1, $2)
+       RETURNING *`,
+        [chatTitleGenerated.content.trim(), user.id]
+      );
+
+      const chat = chatResult.rows[0];
+      await pool.query(
+        `INSERT INTO chat_users (chat_id, user_id)
+       VALUES ($1, $2)`,
+        [chat.id, user.id]
+      );
+      res.write(JSON.stringify({chat: chat}) + "\n");
+      chatId = chat.id;
+    }
 
     const messageResult = await pool.query(
       `INSERT INTO messages (chat_id, sender_type, sender_id, content)
        VALUES ($1, 'user', $2, $3)
        RETURNING *`,
-      [id, user.id, content]
+      [chatId, user.id, content]
     );
     const message: Message = messageResult.rows[0];
     res.write(JSON.stringify({message: message}) + "\n");
 
-    const session = `${id}`
+    const session = `chat-${chatId}`
     let generatedMessageContent = "";
 
     for await (const chunk of runOllamaStream(Number(node_id), model, session, [
@@ -127,7 +151,7 @@ export const postChatMessage = async (req: Request, res: Response) => {
       `INSERT INTO messages (chat_id, sender_type, sender_id, content)
        VALUES ($1, 'ai', $2, $3)
        RETURNING *`,
-      [id, null, generatedMessageContent]
+      [chatId, null, generatedMessageContent]
     );
     const generatedMessage: Message = generatedResult.rows[0];
     res.write(JSON.stringify({generated_message: generatedMessage}) + "\n");

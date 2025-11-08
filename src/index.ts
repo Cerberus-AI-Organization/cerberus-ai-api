@@ -15,7 +15,19 @@ import {refreshNodeStatuses} from "./controllers/computeNodeController";
 dotenv.config();
 const app = express();
 
-app.use(cors({origin: process.env.CORS_URL, credentials: true}));
+app.use(cors({
+  origin: (origin, callback) => {
+    const allowedOrigin = process.env.CORS_URL;
+
+    if (!origin || origin === allowedOrigin) {
+      callback(null, true);
+    } else {
+      console.log(`❌ CORS ZABLOKOVÁN pro: ${origin}`);
+      callback(new Error('CORS blocked'));
+    }
+  },
+  credentials: true
+}));
 app.use(express.json());
 
 if (!process.env.JWT_SECRET) {

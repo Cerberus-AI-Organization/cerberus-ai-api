@@ -70,8 +70,8 @@ databaseInit().then(() => {
         });
     }
 
-    // Refresh compute-nodes statuses every 60 seconds
+    // Refresh compute-nodes statuses every 15 seconds
     refreshNodeStatuses().then(r => {
-        setInterval(refreshNodeStatuses, 60 * 1000);
+        setInterval(refreshNodeStatuses, 15 * 1000);
     })
 });

@@ -10,7 +10,6 @@ export interface OllamaMessage {
 export async function runOllamaSync(
   nodeId: number,
   model: string,
-  session: string,
   messages: OllamaMessage[]
 ): Promise<{ content: string; done: boolean }> {
   const node = await getNodeById(nodeId);
@@ -26,7 +25,6 @@ export async function runOllamaSync(
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       model,
-      session,
       messages,
       keep_alive
     }),
@@ -51,7 +49,6 @@ export async function runOllamaSync(
 export async function* runOllamaStream(
   nodeId: number,
   model: string,
-  session: string,
   messages: OllamaMessage[]
 ): AsyncGenerator<{ content: string; done: boolean }> {
   const node = await getNodeById(nodeId);
@@ -68,7 +65,6 @@ export async function* runOllamaStream(
     headers: {"Content-Type": "application/json"},
     body: JSON.stringify({
       model,
-      session,
       messages,
       keep_alive,
     }),

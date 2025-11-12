@@ -106,18 +106,18 @@ export const postChatMessage = async (req: Request, res: Response) => {
       }
     } else {
       const chatTitleGenerated = await runOllamaSync(Number(node_id), model, [
-        {
-          role: "system",
-          content: `Create a new chat title (max 5 words) from content and return it as a string. Return it in language of the user. Return only text not \"`
-        },
-        {role: "user", content: content}
+        {role: "system", content: "Your name is CerberusAI and you must help people in cybersecurity."},
+        {role: "system", content: `Create a new chat title (max 5 words) from content and return it as a string. Return it in language of the user. Return only text not \"`},
+        {role: "user", content: `Create chat title for this message in chat: [${content}], return only title with no \" or else`},
       ]);
+
+      const cleanedTitle = chatTitleGenerated.content.trim().replace(/["']/g, "");
 
       const chatResult = await pool.query(
         `INSERT INTO chats (title, created_by)
          VALUES ($1, $2)
          RETURNING *`,
-        [chatTitleGenerated.content.trim(), user.id]
+        [cleanedTitle, user.id]
       );
       const chat = chatResult.rows[0];
       chatId = chat.id;
@@ -131,7 +131,10 @@ export const postChatMessage = async (req: Request, res: Response) => {
     }
 
     const chatMessagesResult = await pool.query(`SELECT * FROM messages WHERE chat_id = $1 ORDER BY messages.id`, [chatId]);
-    const chatMessages: OllamaMessage[] = chatMessagesResult.rows.map(m => ({role: m.sender_type === 'user' ? 'user' : 'assistant', content: m.content}));
+    const chatMessages: OllamaMessage[] = chatMessagesResult.rows.map(m => ({
+      role: m.sender_type === 'user' ? 'user' : 'assistant',
+      content: m.content
+    }));
 
     const messageResult = await pool.query(
       `INSERT INTO messages (chat_id, sender_type, sender_id, content)

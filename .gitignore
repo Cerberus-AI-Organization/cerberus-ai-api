@@ -3,3 +3,5 @@
 node_modules
 package-lock.json
 dist
+data/vector_db
+data/texts

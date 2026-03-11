@@ -1,7 +1,7 @@
-import { pool } from './database';
+import { pool } from '../database';
 import bcrypt from 'bcrypt';
 
-export async function databaseInit() {
+export async function initDatabase() {
     try {
         await pool.query(`
           CREATE TABLE IF NOT EXISTS users (
@@ -17,6 +17,9 @@ export async function databaseInit() {
             hostname TEXT NOT NULL,
             ip TEXT NOT NULL,
             port INT NOT NULL,
+            priority INT NOT NULL DEFAULT 0,
+            max_ctx INT NOT NULL DEFAULT 4096,
+            max_layers_on_gpu INT NOT NULL DEFAULT -1,
             added_by INT REFERENCES users(id) ON DELETE SET NULL,
             status TEXT NOT NULL CHECK (status IN ('online','offline')) DEFAULT 'offline',
             created_at TIMESTAMP DEFAULT NOW()

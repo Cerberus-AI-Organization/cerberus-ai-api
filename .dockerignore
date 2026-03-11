@@ -1,3 +1,4 @@
+Dockerfile
 node_modules
 dist
 build
@@ -7,3 +8,6 @@ build
 
 .git
 .gitignore
+
+data/vector_db
+data/texts

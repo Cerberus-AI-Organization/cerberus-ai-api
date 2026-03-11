@@ -12,13 +12,21 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@lancedb/lancedb": "^0.24.1",
+    "@opendocsg/pdf2md": "^0.2.3",
+    "axios": "^1.13.4",
     "bcrypt": "^6.0.0",
+    "cheerio": "^1.2.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.2",
     "node-fetch": "^3.3.2",
-    "pg": "^8.16.3"
+    "ollama": "^0.6.3",
+    "pdf-parse": "^2.4.5",
+    "pdfjs-dist": "^5.4.624",
+    "pg": "^8.16.3",
+    "tiktoken": "^1.0.22"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -26,6 +34,7 @@
     "@types/express": "^5.0.3",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.6.1",
+    "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.15.5",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",

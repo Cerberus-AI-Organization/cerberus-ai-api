@@ -1,16 +1,20 @@
-import express, { Request, Response } from 'express';
+import express, {Request, Response} from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import http from 'http';
 import https from 'https';
 import fs from 'fs';
-import { databaseInit } from './core/databaseInit';
-import authRoutes from './routes/auth';
-import userRoutes from './routes/users';
-import computeNodeRoutes from './routes/computeNodes';
-import ollamaRoutes from './routes/ollama';
-import chatRoutes from './routes/chat';
+import {initDatabase} from './core/init/initDatabase';
+import authRoutes from './routes/authRoutes';
+import userRoutes from './routes/usersRoutes';
+import computeNodeRoutes from './routes/computeNodesRoutes';
+import ollamaRoutes from './routes/ollamaRoutes';
+import chatRoutes from './routes/chatRoutes';
 import {refreshNodeStatuses} from "./controllers/computeNodeController";
+import {initKnowledge, syncKnowledge} from "./core/init/initKnowledge";
+import knowledgeRoutes from "./routes/knowledgeRoutes";
+import {Knowledge} from "./core/rag/knowledge";
+import {initNodes} from "./core/init/initNodes";
 
 dotenv.config();
 const app = express();
@@ -22,7 +26,7 @@ app.use(cors({
     if (!origin || origin === allowedOrigin) {
       callback(null, true);
     } else {
-      console.log(`❌ CORS ZABLOKOVÁN pro: ${origin}`);
+      console.log(`❌ CORS Blocked for: ${origin}`);
       callback(new Error('CORS blocked'));
     }
   },
@@ -34,44 +38,62 @@ if (!process.env.JWT_SECRET) {
   throw new Error("⛔ JWT_SECRET is not set in .env");
 }
 
-databaseInit().then(() => {
-    console.log('✅  DB initialized');
+async function main(app: express.Application) {
+  await initDatabase();
+  console.log('✅  DB initialized');
 
-    // Routes
-    app.get('/', (req: Request, res: Response) => {
-        res.json({ message: 'Cerberus AI API is running' });
+  // Refresh compute-nodes statuses every 15 seconds
+  await refreshNodeStatuses()
+  await initNodes()
+  setInterval(refreshNodeStatuses, 15 * 1000);
+
+  initKnowledge().then(() => {
+    console.log('✅  Knowledge initialized');
+  }).catch(err => {
+    console.error('❌  Knowledge failed to initialize:', err);
+  });
+  setInterval(syncKnowledge, 12 * 60 * 60 * 1000);
+
+
+  createServer(app);
+}
+
+function createServer(app: express.Application) {
+  // Routes
+  app.get('/', (req: Request, res: Response) => {
+    res.json({message: 'Cerberus AI API is running'});
+  });
+
+  app.use('/auth', authRoutes);
+  app.use('/users', userRoutes);
+  app.use('/compute-nodes', computeNodeRoutes);
+  app.use('/compute-nodes', ollamaRoutes);
+  app.use('/chats', chatRoutes);
+  app.use('/knowledge', knowledgeRoutes);
+
+  const PORT = process.env.PORT || 8080;
+
+  // SSL certificate and server setup
+  const sslKey = process.env.SSL_KEY_PATH;
+  const sslCert = process.env.SSL_CERT_PATH;
+
+  if (sslKey && sslCert && fs.existsSync(sslKey) && fs.existsSync(sslCert)) {
+    // Start HTTPS server
+    const httpsOptions = {
+      key: fs.readFileSync(sslKey),
+      cert: fs.readFileSync(sslCert)
+    };
+    https.createServer(httpsOptions, app).listen(PORT, () => {
+      console.log(`🔒 HTTPS Server running on https://localhost:${PORT}`);
     });
+  } else {
+    // Start HTTP server
+    http.createServer(app).listen(PORT, () => {
+      console.log(`🔓 HTTP Server running on http://localhost:${PORT}`);
+    });
+  }
+}
 
-    app.use('/auth', authRoutes);
-    app.use('/users', userRoutes);
-    app.use('/compute-nodes', computeNodeRoutes);
-    app.use('/compute-nodes', ollamaRoutes);
-    app.use('/chats', chatRoutes);
-
-    const PORT = process.env.PORT || 8080;
-
-    // SSL certificate and server setup
-    const sslKey = process.env.SSL_KEY_PATH;
-    const sslCert = process.env.SSL_CERT_PATH;
-
-    if (sslKey && sslCert && fs.existsSync(sslKey) && fs.existsSync(sslCert)) {
-        // Start HTTPS server
-        const httpsOptions = {
-            key: fs.readFileSync(sslKey),
-            cert: fs.readFileSync(sslCert)
-        };
-        https.createServer(httpsOptions, app).listen(PORT, () => {
-            console.log(`🔒 HTTPS Server running on https://localhost:${PORT}`);
-        });
-    } else {
-        // Start HTTP server
-        http.createServer(app).listen(PORT, () => {
-            console.log(`🔓 HTTP Server running on http://localhost:${PORT}`);
-        });
-    }
-
-    // Refresh compute-nodes statuses every 15 seconds
-    refreshNodeStatuses().then(r => {
-        setInterval(refreshNodeStatuses, 15 * 1000);
-    })
+main(app).then(() => {
+  console.log("API Start Finished")
 });

@@ -1,7 +1,9 @@
 import { Request, Response } from 'express';
 import { pool } from '../core/database';
 import { ComputeNode } from '../types/computeNode';
-import net from 'net'; // pro online kontrolu
+import net from 'net';
+import {buildOllamaUrl} from '../core/ollama'
+import {initKnowledge} from "../core/init/initKnowledge";
 
 export async function checkOnline(ip: string, port: number): Promise<'online' | 'offline'> {
     return new Promise((resolve) => {
@@ -21,7 +23,7 @@ export async function checkOnline(ip: string, port: number): Promise<'online' | 
     });
 }
 
-export async function refreshNodeStatuses() {
+export async function refreshNodeStatuses(): Promise<boolean> {
   try {
     const result = await pool.query('SELECT id, hostname, ip, port, status as current_status FROM compute_nodes');
     let statusesChanged = false;
@@ -42,11 +44,13 @@ export async function refreshNodeStatuses() {
     if (statusesChanged) {
       console.log(`✅  Compute node status changes detected at ${new Date().toISOString()}`);
     }
+    return statusesChanged;
   } catch (err) {
     console.error('❌ Error refreshing compute node statuses:', err);
+    return false;
   }
 }
-// Přidat nový node (jen admin)
+
 export const addComputeNode = async (req: Request, res: Response) => {
     const { hostname, ip, port } = req.body;
     const user = (req as any).user;
@@ -57,11 +61,18 @@ export const addComputeNode = async (req: Request, res: Response) => {
 
     try {
         const status = await checkOnline(ip, port);
+        if (status === 'offline') {
+          throw new Error('Node is offline');
+        }
+
         const result = await pool.query<ComputeNode>(
-            `INSERT INTO compute_nodes (hostname, ip, port, added_by, status) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            `INSERT INTO compute_nodes (hostname, ip, port, added_by, status)
+             VALUES ($1, $2, $3, $4, $5)
+             RETURNING *`,
             [hostname, ip, port, user.id, status]
         );
+
+        await initKnowledge()
 
         res.status(201).json(result.rows[0]);
     } catch (err) {
@@ -70,7 +81,6 @@ export const addComputeNode = async (req: Request, res: Response) => {
     }
 };
 
-// Upravit node (jen admin)
 export const updateComputeNode = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { hostname, ip, port } = req.body;
@@ -100,7 +110,6 @@ export const updateComputeNode = async (req: Request, res: Response) => {
     }
 };
 
-// Get all nodes – jiný pohled pro admina a usera
 export const getComputeNodes = async (req: Request, res: Response) => {
     const user = (req as any).user;
 
@@ -110,7 +119,7 @@ export const getComputeNodes = async (req: Request, res: Response) => {
             return res.json(result.rows);
         } else {
             const result = await pool.query(
-                'SELECT id, hostname, status FROM compute_nodes'
+                'SELECT id, hostname, status, priority FROM compute_nodes'
             );
             return res.json(result.rows);
         }

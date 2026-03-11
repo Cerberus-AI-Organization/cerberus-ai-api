@@ -1,56 +1,108 @@
-import fetch from "node-fetch";
-import {checkOnline} from "../controllers/computeNodeController";
-import {getNodeById, buildOllamaUrl} from "../controllers/ollamaController";
+import {Ollama, Tool, ToolCall, Message} from "ollama";
+import { checkOnline } from "../controllers/computeNodeController";
+import { getNodeById } from "../controllers/ollamaController";
+import {ComputeNode} from "../types/computeNode";
+import {encoding_for_model} from "tiktoken";
 
-export interface OllamaMessage {
-  role: "user" | "assistant" | "system";
-  content: string;
+export interface OllamaMessage extends Message {}
+
+export function buildOllamaUrl(ip: string, port: number) {
+  if (ip.includes("http://") || ip.includes("https://")) {
+    return `${ip}:${port}`;
+  }
+  return `http://${ip}:${port}`;
+}
+
+export function createOllamaClient(baseUrl: string) {
+  return new Ollama({
+    host: baseUrl,
+  });
+}
+
+export function createOllamaClientFromNode(node: ComputeNode) {
+  return createOllamaClient(buildOllamaUrl(node.ip, node.port));
+}
+
+
+
+export async function haveModel(node: ComputeNode, model: string) {
+  const ollama = createOllamaClientFromNode(node);
+  const models = await ollama.list();
+  return models.models.some(m => m.name === model);
+}
+
+export function countTokens(text: string) {
+  const enc = encoding_for_model("gpt-4");
+  return enc.encode(text).length;
+}
+
+export function roundCtx(ctx: number, maxValue: number): number {
+  if (ctx <= 0) return 0;
+  const rounded = Math.pow(2, Math.ceil(Math.log2(ctx)));
+  return Math.min(rounded, maxValue);
+}
+
+export interface RunOllamaOptions {
+  tools?: Tool[];
+  think?: boolean | "high" | "medium" | "low";
+  num_ctx?: number;
+  temperature?: number;
+  num_predict?: number;
 }
 
 export async function runOllamaSync(
   nodeId: number,
   model: string,
-  messages: OllamaMessage[]
-): Promise<{ content: string; done: boolean }> {
+  messages: OllamaMessage[],
+  options: RunOllamaOptions = {}
+): Promise<{ content: string; thinking: string, tool_calls: ToolCall[], done: boolean }> {
+
   const node = await getNodeById(nodeId);
   const status = await checkOnline(node.ip, node.port);
+
   if (status === "offline") {
     throw new Error("Node is offline");
   }
 
   const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
+  const ollama = createOllamaClientFromNode(node);
 
-  const response = await fetch(`${buildOllamaUrl(node)}/api/chat`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      model,
-      messages,
-      keep_alive
-    }),
+  const ctx = options.num_ctx ? roundCtx(options.num_ctx, node.max_ctx) : undefined;
+  console.log(`Starting Ollama sync with ctx ${ctx} for model ${model} on node ${node.hostname}`)
+
+  const response = await ollama.chat({
+    model,
+    messages,
+    keep_alive,
+    stream: false,
+    think: options.think,
+    tools: options.tools,
+    options: {
+      num_ctx: ctx,
+      num_gpu: node.max_layers_on_gpu,
+      temperature: options.temperature,
+      num_predict: options.num_predict,
+    }
+  }).catch(err => {
+    console.error("Error running Ollama sync", err);
+    throw err;
   });
 
-  if (!response.ok) {
-    throw new Error(`Ollama returned ${response.status}`);
-  }
-
-  if (!response.body) {
-    throw new Error("No response body from Ollama");
-  }
-
-  const text = await response.text();
-  const lines = text.trim().split('\n');
-  const parsed_lines = lines.map(line => JSON.parse(line));
-  const content = parsed_lines.map(line => line.message.content).join("")
-
-  return {content: content, done: parsed_lines[parsed_lines.length - 1].done};
+  return {
+    content: response.message?.content ?? "",
+    thinking: response.message?.thinking   ?? "",
+    tool_calls: response.message?.tool_calls ?? [],
+    done: true,
+  };
 }
 
 export async function* runOllamaStream(
   nodeId: number,
   model: string,
-  messages: OllamaMessage[]
-): AsyncGenerator<{ content: string; done: boolean }> {
+  messages: OllamaMessage[],
+  options: RunOllamaOptions = {}
+): AsyncGenerator<{ content: string; thinking: string, tool_calls: ToolCall[], done: boolean }> {
+
   const node = await getNodeById(nodeId);
   const status = await checkOnline(node.ip, node.port);
 
@@ -59,51 +111,36 @@ export async function* runOllamaStream(
   }
 
   const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
+  const ollama = createOllamaClientFromNode(node);
 
-  const response = await fetch(`${buildOllamaUrl(node)}/api/chat`, {
-    method: "POST",
-    headers: {"Content-Type": "application/json"},
-    body: JSON.stringify({
-      model,
-      messages,
-      keep_alive,
-    }),
+  const ctx = options.num_ctx ? roundCtx(options.num_ctx, node.max_ctx) : undefined;
+  console.log(`Starting Ollama stream with ctx ${ctx} for model ${model} on node ${node.hostname}`)
+
+  const stream = await ollama.chat({
+    model,
+    messages,
+    keep_alive,
+    stream: true,
+    think: options.think,
+    tools: options.tools,
+    options: {
+      num_ctx: ctx,
+      num_gpu: node.max_layers_on_gpu,
+      temperature: options.temperature,
+      num_predict: options.num_predict,
+    }
+  }).catch(err => {
+    console.error("Error running Ollama stream", err);
+    throw err;
   });
 
-  if (!response.body) {
-    throw new Error("No response body from Ollama");
-  }
-
-  let buffer = "";
-
-  for await (const chunk of response.body) {
-    buffer += chunk.toString();
-    const lines = buffer.split("\n");
-    buffer = lines.pop() || "";
-
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const parsed = JSON.parse(line);
-        yield {
-          content: parsed?.message?.content || "",
-          done: parsed?.done || false,
-        };
-      } catch (err) {
-        console.error("Parse error:", err);
-      }
-    }
-  }
-
-  if (buffer.trim()) {
-    try {
-      const parsed = JSON.parse(buffer);
-      yield {
-        content: parsed?.message?.content || "",
-        done: parsed?.done || false,
-      };
-    } catch {
-    }
+  for await (const chunk of stream) {
+    yield {
+      content: chunk.message?.content ?? "",
+      thinking:   chunk.message?.thinking   ?? "",
+      tool_calls: chunk.message?.tool_calls ?? [],
+      done: chunk.done ?? false,
+    };
   }
 }
 

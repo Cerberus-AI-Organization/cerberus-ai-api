@@ -2,13 +2,19 @@ import {Request, Response} from "express";
 import {pool} from "../core/database";
 import {checkOnline} from "./computeNodeController";
 import {getNodeById} from "./ollamaController";
-import {countTokens, type OllamaMessage, runOllamaStream, runOllamaSync} from "../core/ollama";
+import {
+  countTokens,
+  createOllamaClientFromNode,
+  type OllamaMessage,
+  runOllamaStream,
+  runOllamaSync
+} from "../core/ollama";
 import {Message} from "../types/message";
 import {Knowledge} from "../core/rag/knowledge";
 import {ComputeNode} from "../types/computeNode";
 import {DocumentRow} from "../core/rag/types";
 import {encoding_for_model} from "tiktoken";
-import {Tool, ToolCall} from "ollama";
+import {Tool, ToolCall, WebFetchResponse, WebSearchResult} from "ollama";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS — Logging
@@ -385,6 +391,23 @@ const getKnowledge = async (
   return {rag_results: filtered, rag_formated: formatted};
 }
 
+const webSearch = async (query: string, limit: number, node: ComputeNode): Promise<WebSearchResult[]> => {
+  const ollama = createOllamaClientFromNode(node);
+  const response = await ollama.webSearch({
+    query: query,
+    maxResults: 5
+  });
+
+  return response.results
+}
+
+const webFetch = async (url: string, node: ComputeNode): Promise<WebFetchResponse> => {
+  const ollama = createOllamaClientFromNode(node);
+  return await ollama.webFetch({
+    url: url,
+  });
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AI — Message streaming (agent loop)
 // ─────────────────────────────────────────────────────────────────────────────
@@ -509,10 +532,12 @@ const streamAIMessage = async (
 
     for (const call of toolCalls) {
       if (call.function.name === "get_current_date") {
+        // ── GetCurrentDate ─────────────────────────────────────────────────────────────────────
         const result = getCurrentDate();
         messages.push({ role: 'tool', tool_name: call.function.name, content: result } )
         clog.log("Stream", `Executed tool call: ${call.function.name} - ${result}`);
       } else if (call.function.name === "get_knowledge") {
+        // ── GetKnowledge ─────────────────────────────────────────────────────────────────────
         streamWrite(res, { generation_state: "preparing_rag" });
         const args = call.function.arguments as { query: string }
         const result = await getKnowledge(args.query, node, model, rag.limit, rag.use_advanced);
@@ -525,6 +550,18 @@ const streamAIMessage = async (
         }
         clog.log("Stream", `Executed tool call: ${call.function.name} - ${result.rag_results.flat().length} chars`);
         streamWrite(res, { generation_state: "executing_tools" });
+      } else if (call.function.name === "web_search") {
+        // ── WebSearch ─────────────────────────────────────────────────────────────────────
+        const args = call.function.arguments as { query: string }
+        const results = await webSearch(args.query, 5, node);
+        messages.push({ role: 'tool', tool_name: call.function.name, content: JSON.stringify(results) } )
+        clog.log("Stream", `Executed tool call: ${call.function.name} - ${results.length} results`);
+      } else if (call.function.name === "web_fetch") {
+        // ── WebFetch ─────────────────────────────────────────────────────────────────────
+        const args = call.function.arguments as { url: string }
+        const result = await webFetch(args.url, node);
+        messages.push({ role: 'tool', tool_name: call.function.name, content: JSON.stringify(result) } )
+        clog.log("Stream", `Executed tool call: ${call.function.name} - ${result.title}`);
       } else {
         messages.push({ role: 'tool', tool_name: call.function.name, content: 'Unknown tool' } )
         clog.warn("Stream", `Unknown tool call: ${call.function.name}`);
@@ -666,12 +703,12 @@ export const postChatMessage = async (req: Request, res: Response) => {
       content:
         "Your name is CerberusAI and you must help people in cybersecurity. " +
         "Use user's language as output. " +
-        "When used something from RAG promote from with source it is. " +
-        "You have access to tools: use get_current_date for date/time, " +
-        "get_knowledge to search internal documents, " +
-        "web_search to find current information on the web, " +
-        "web_fetch to retrieve a specific web page. " +
-        "Use tools whenever they would help answer the user's question more accurately.",
+        "When used something from RAG promote from with source it is. "
+        // "You have access to tools: use get_current_date for date/time, " +
+        // "get_knowledge to search internal documents, " +
+        // "web_search to find current information on the web, " +
+        // "web_fetch to retrieve a specific web page. " +
+        // "Use tools whenever they would help answer the user's question more accurately.",
     };
 
     const history = await fetchChatHistory(chatId);

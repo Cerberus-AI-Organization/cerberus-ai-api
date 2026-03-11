@@ -460,7 +460,6 @@ const streamAIMessage = async (
     neededTools.push("web_search", "web_fetch");
   }
   const tools = getTools(neededTools);
-  console.log("tools", tools);
 
   let messages = buildMessageContext(systemMessage, null, chatHistory, content);
 
@@ -549,7 +548,7 @@ const streamAIMessage = async (
           completeRag = Knowledge.instance.deduplicateDocumentRows(completeRag);
           streamWrite(res, { rag_results: completeRag });
         }
-        clog.log("Stream", `Executed tool call: ${call.function.name} - ${result.rag_results.flat().length} chars`);
+        clog.log("Stream", `Executed tool call: ${call.function.name} > "${args.query}" - ${result.rag_results.flat().length} chars`);
         streamWrite(res, { generation_state: "executing_tools" });
       } else if (call.function.name === "web_search") {
         // ── WebSearch ─────────────────────────────────────────────────────────────────────
@@ -557,7 +556,7 @@ const streamAIMessage = async (
         try {
           const results = await webSearch(args.query, 5, node);
           messages.push({role: 'tool', tool_name: call.function.name, content: JSON.stringify(results)})
-          clog.log("Stream", `Executed tool call: ${call.function.name} - ${results.length} results`);
+          clog.log("Stream", `Executed tool call: ${call.function.name} > "${args.query}" - ${results.length} results`);
         } catch (err) {
           messages.push({role: 'tool', tool_name: call.function.name, content: "Failed to search the web."})
           clog.error("Stream", `Failed to execute tool call: ${call.function.name} - ${err}`);
@@ -568,7 +567,7 @@ const streamAIMessage = async (
         try {
           const result = await webFetch(args.url, node);
           messages.push({role: 'tool', tool_name: call.function.name, content: JSON.stringify(result)})
-          clog.log("Stream", `Executed tool call: ${call.function.name} - ${result.title}`);
+          clog.log("Stream", `Executed tool call: ${call.function.name} > "${args.url}" - ${result.title}`);
         } catch (err) {
           messages.push({role: 'tool', tool_name: call.function.name, content: "Failed to fetch the web page."})
           clog.error("Stream", `Failed to execute tool call: ${call.function.name} - ${err}`);

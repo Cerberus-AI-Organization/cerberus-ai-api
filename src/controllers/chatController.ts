@@ -358,7 +358,7 @@ const getTools = (includeTools: string[]): Tool[] => {
     },
   ];
 
-  return tools.filter(tool => tool.function.name ? tool.function.name in includeTools : false);
+  return tools.filter(tool => tool.function?.name && includeTools.includes(tool.function.name));
 }
 
 const getCurrentDate = (): string => {
@@ -460,6 +460,7 @@ const streamAIMessage = async (
     neededTools.push("web_search", "web_fetch");
   }
   const tools = getTools(neededTools);
+  console.log("tools", tools);
 
   let messages = buildMessageContext(systemMessage, null, chatHistory, content);
 
@@ -553,15 +554,25 @@ const streamAIMessage = async (
       } else if (call.function.name === "web_search") {
         // ── WebSearch ─────────────────────────────────────────────────────────────────────
         const args = call.function.arguments as { query: string }
-        const results = await webSearch(args.query, 5, node);
-        messages.push({ role: 'tool', tool_name: call.function.name, content: JSON.stringify(results) } )
-        clog.log("Stream", `Executed tool call: ${call.function.name} - ${results.length} results`);
+        try {
+          const results = await webSearch(args.query, 5, node);
+          messages.push({role: 'tool', tool_name: call.function.name, content: JSON.stringify(results)})
+          clog.log("Stream", `Executed tool call: ${call.function.name} - ${results.length} results`);
+        } catch (err) {
+          messages.push({role: 'tool', tool_name: call.function.name, content: "Failed to search the web."})
+          clog.error("Stream", `Failed to execute tool call: ${call.function.name} - ${err}`);
+        }
       } else if (call.function.name === "web_fetch") {
         // ── WebFetch ─────────────────────────────────────────────────────────────────────
         const args = call.function.arguments as { url: string }
-        const result = await webFetch(args.url, node);
-        messages.push({ role: 'tool', tool_name: call.function.name, content: JSON.stringify(result) } )
-        clog.log("Stream", `Executed tool call: ${call.function.name} - ${result.title}`);
+        try {
+          const result = await webFetch(args.url, node);
+          messages.push({role: 'tool', tool_name: call.function.name, content: JSON.stringify(result)})
+          clog.log("Stream", `Executed tool call: ${call.function.name} - ${result.title}`);
+        } catch (err) {
+          messages.push({role: 'tool', tool_name: call.function.name, content: "Failed to fetch the web page."})
+          clog.error("Stream", `Failed to execute tool call: ${call.function.name} - ${err}`);
+        }
       } else {
         messages.push({ role: 'tool', tool_name: call.function.name, content: 'Unknown tool' } )
         clog.warn("Stream", `Unknown tool call: ${call.function.name}`);
@@ -706,8 +717,8 @@ export const postChatMessage = async (req: Request, res: Response) => {
         "When used something from RAG promote from with source it is. "
         // "You have access to tools: use get_current_date for date/time, " +
         // "get_knowledge to search internal documents, " +
-        // "web_search to find current information on the web, " +
-        // "web_fetch to retrieve a specific web page. " +
+        // (rag.use_web_search ? "web_search to find current information on the web, " : "") +
+        // (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
         // "Use tools whenever they would help answer the user's question more accurately.",
     };
 

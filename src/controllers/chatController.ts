@@ -455,7 +455,10 @@ const streamAIMessage = async (
   const MAX_RESPONSE_TOKENS = 1000;
   const MAX_TOOL_ITERATIONS = 10;
 
-  const neededTools = ["get_current_date", "get_knowledge"];
+  const neededTools = ["get_current_date"];
+  if (rag.limit > 0) {
+    neededTools.push("get_knowledge");
+  }
   if (rag.use_web_search) {
     neededTools.push("web_search", "web_fetch");
   }
@@ -713,12 +716,12 @@ export const postChatMessage = async (req: Request, res: Response) => {
       content:
         "Your name is CerberusAI and you must help people in cybersecurity. " +
         "Use user's language as output. " +
-        "When used something from RAG promote from with source it is. "
-        // "You have access to tools: use get_current_date for date/time, " +
-        // "get_knowledge to search internal documents, " +
-        // (rag.use_web_search ? "web_search to find current information on the web, " : "") +
-        // (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
-        // "Use tools whenever they would help answer the user's question more accurately.",
+        "When used something from RAG promote from with source it is. " +
+        "You have access to tools: use get_current_date for date/time, " +
+        (rag.limit > 0 ? "get_knowledge to search internal documents, " : "") +
+        (rag.use_web_search ? "web_search to find current information on the web, " : "") +
+        (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
+        "Use tools whenever they would help answer the user's question more accurately."
     };
 
     const history = await fetchChatHistory(chatId);

@@ -14,16 +14,12 @@ export function buildOllamaUrl(ip: string, port: number) {
 }
 
 export function createOllamaClient(baseUrl: string) {
-  return new Ollama({
-    host: baseUrl,
-  });
+  return new Ollama({ host: baseUrl });
 }
 
 export function createOllamaClientFromNode(node: ComputeNode) {
   return createOllamaClient(buildOllamaUrl(node.ip, node.port));
 }
-
-
 
 export async function haveModel(node: ComputeNode, model: string) {
   const ollama = createOllamaClientFromNode(node);
@@ -31,7 +27,7 @@ export async function haveModel(node: ComputeNode, model: string) {
   return models.models.some(m => m.name === model);
 }
 
-export function countTokens(text: string) {
+export function countTokens(text: string): number {
   const enc = encoding_for_model("gpt-4");
   return enc.encode(text).length;
 }
@@ -42,6 +38,50 @@ export function roundCtx(ctx: number, maxValue: number): number {
   return Math.min(rounded, maxValue);
 }
 
+export function truncateMessagesToFit(messages: OllamaMessage[], maxCtx: number): OllamaMessage[] {
+  const result = messages.map(m => ({ ...m }));
+
+  while (true) {
+    const totalTokens = result.reduce((acc, msg) => acc + countTokens(msg.content), 0);
+    if (totalTokens <= maxCtx) break;
+
+    const overflow = totalTokens - maxCtx;
+
+    // Find longest non-system message
+    let longestIdx = -1;
+    let longestTokens = 0;
+    for (let i = 0; i < result.length; i++) {
+      if (result[i].role === "system") continue;
+      const tokens = countTokens(result[i].content);
+      if (tokens > longestTokens) {
+        longestTokens = tokens;
+        longestIdx = i;
+      }
+    }
+
+    if (longestIdx === -1) break; // Only system messages remain, nothing to truncate
+
+    // Trim `overflow` tokens from the beginning of the message content
+    const enc = encoding_for_model("gpt-4");
+    const encoded = enc.encode(result[longestIdx].content);
+    const trimCount = Math.min(overflow + 50, encoded.length); // +50 buffer to avoid tight loops
+    const trimmed = encoded.slice(trimCount);
+    result[longestIdx] = {
+      ...result[longestIdx],
+      content: new TextDecoder().decode(enc.decode(trimmed)),
+    };
+
+    // If message is now empty, remove it entirely
+    if (!result[longestIdx].content.trim()) {
+      result.splice(longestIdx, 1);
+    }
+
+    result[longestIdx].content += "[Message truncated because of context limit exceeded.]";
+  }
+
+  return result;
+}
+
 export interface RunOllamaOptions {
   tools?: Tool[];
   think?: boolean | "high" | "medium" | "low";
@@ -50,13 +90,19 @@ export interface RunOllamaOptions {
   num_predict?: number;
 }
 
-export async function runOllamaSync(
+interface PreparedOllamaChat {
+  ollama: Ollama;
+  ctx: number | undefined;
+  keep_alive: number;
+  node: ComputeNode;
+}
+
+async function prepareOllamaChat(
   nodeId: number,
   model: string,
   messages: OllamaMessage[],
-  options: RunOllamaOptions = {}
-): Promise<{ content: string; thinking: string, tool_calls: ToolCall[], done: boolean }> {
-
+  options: RunOllamaOptions
+): Promise<{ prepared: PreparedOllamaChat; messages: OllamaMessage[] }> {
   const node = await getNodeById(nodeId);
   const status = await checkOnline(node.ip, node.port);
 
@@ -66,13 +112,39 @@ export async function runOllamaSync(
 
   const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
   const ollama = createOllamaClientFromNode(node);
-
   const ctx = options.num_ctx ? roundCtx(options.num_ctx, node.max_ctx) : undefined;
-  console.log(`Starting Ollama sync with ctx ${ctx} for model ${model} on node ${node.hostname}`)
+
+  const neededCtx = messages.reduce((acc, msg) => acc + countTokens(msg.content), 0);
+  console.log(`Ollama ctx: ${ctx} (needed: ${neededCtx} + response) | model: ${model} | node: ${node.hostname}`);
+
+  const effectiveMax = ctx ?? node.max_ctx;
+  const truncatedMessages = neededCtx > effectiveMax
+    ? truncateMessagesToFit(messages, effectiveMax)
+    : messages;
+
+  if (truncatedMessages !== messages) {
+    const newTotal = truncatedMessages.reduce((acc, msg) => acc + countTokens(msg.content), 0);
+    console.warn(`Messages truncated: ${neededCtx} → ${newTotal} tokens`);
+  }
+
+  return {
+    prepared: { ollama, ctx, keep_alive, node },
+    messages: truncatedMessages,
+  };
+}
+
+export async function runOllamaSync(
+  nodeId: number,
+  model: string,
+  messages: OllamaMessage[],
+  options: RunOllamaOptions = {}
+): Promise<{ content: string; thinking: string; tool_calls: ToolCall[]; done: boolean }> {
+  const { prepared, messages: msgs } = await prepareOllamaChat(nodeId, model, messages, options);
+  const { ollama, ctx, keep_alive, node } = prepared;
 
   const response = await ollama.chat({
     model,
-    messages,
+    messages: msgs,
     keep_alive,
     stream: false,
     think: options.think,
@@ -82,7 +154,7 @@ export async function runOllamaSync(
       num_gpu: node.max_layers_on_gpu,
       temperature: options.temperature,
       num_predict: options.num_predict,
-    }
+    },
   }).catch(err => {
     console.error("Error running Ollama sync", err);
     throw err;
@@ -90,7 +162,7 @@ export async function runOllamaSync(
 
   return {
     content: response.message?.content ?? "",
-    thinking: response.message?.thinking   ?? "",
+    thinking: response.message?.thinking ?? "",
     tool_calls: response.message?.tool_calls ?? [],
     done: true,
   };
@@ -101,24 +173,13 @@ export async function* runOllamaStream(
   model: string,
   messages: OllamaMessage[],
   options: RunOllamaOptions = {}
-): AsyncGenerator<{ content: string; thinking: string, tool_calls: ToolCall[], done: boolean }> {
-
-  const node = await getNodeById(nodeId);
-  const status = await checkOnline(node.ip, node.port);
-
-  if (status === "offline") {
-    throw new Error("Node is offline");
-  }
-
-  const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
-  const ollama = createOllamaClientFromNode(node);
-
-  const ctx = options.num_ctx ? roundCtx(options.num_ctx, node.max_ctx) : undefined;
-  console.log(`Starting Ollama stream with ctx ${ctx} for model ${model} on node ${node.hostname}`)
+): AsyncGenerator<{ content: string; thinking: string; tool_calls: ToolCall[]; done: boolean }> {
+  const { prepared, messages: msgs } = await prepareOllamaChat(nodeId, model, messages, options);
+  const { ollama, ctx, keep_alive, node } = prepared;
 
   const stream = await ollama.chat({
     model,
-    messages,
+    messages: msgs,
     keep_alive,
     stream: true,
     think: options.think,
@@ -128,7 +189,7 @@ export async function* runOllamaStream(
       num_gpu: node.max_layers_on_gpu,
       temperature: options.temperature,
       num_predict: options.num_predict,
-    }
+    },
   }).catch(err => {
     console.error("Error running Ollama stream", err);
     throw err;
@@ -137,7 +198,7 @@ export async function* runOllamaStream(
   for await (const chunk of stream) {
     yield {
       content: chunk.message?.content ?? "",
-      thinking:   chunk.message?.thinking   ?? "",
+      thinking: chunk.message?.thinking ?? "",
       tool_calls: chunk.message?.tool_calls ?? [],
       done: chunk.done ?? false,
     };

@@ -63,7 +63,6 @@ export class Knowledge {
     const chunks = this.chunker.createChunks(pages, source);
     const metadataStr = JSON.stringify(metadata);
 
-    const BATCH_SIZE = 1;
     const rows = [];
 
     for (const [i, chunk] of chunks.entries()) {
@@ -114,7 +113,7 @@ export class Knowledge {
     if (!vectorChunks.length) return [];
 
 
-    const chunks:DocumentChunk[] = vectorChunks.map((vc:any) => ({ text: vc.text, source: vc.source, page_source: vc.page_source }));
+    const chunks:RerankedChunk[] = vectorChunks.map((vc:any) => ({ text: vc.text, source: vc.source, page_source: vc.page_source, score: vc._distance }));
     const reranked = await this.reranker.rerank(
       query, chunks, node, model, topK
     );
@@ -201,7 +200,7 @@ export class Knowledge {
       grouped.get(vc.source)!.chunks.push({
         text: vc.text,
         page_source: vc.page_source,
-        score: vc._distance ?? vc.score ?? null, // podle toho co Lance vrací
+        score: vc._distance ?? vc.score ?? null,
       });
     }
 

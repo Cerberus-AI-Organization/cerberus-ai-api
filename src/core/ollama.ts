@@ -27,6 +27,33 @@ export async function haveModel(node: ComputeNode, model: string) {
   return models.models.some(m => m.name === model);
 }
 
+export async function getModelsMaxCtx(model: string): Promise<number | null> {
+  try {
+    const baseModel = model.split(":")[0];
+    const url = `https://ollama.com/library/${baseModel}`;
+
+    const res = await fetch(url);
+    if (!res.ok) return null;
+
+    const html = await res.text();
+    const match = html.match(/(\d+(?:\.\d+)?)([KMB]?)\s*context window/i);
+    if (!match) return null;
+
+    let value = parseFloat(match[1]);
+    const unit = match[2]?.toUpperCase();
+
+    if (unit === "K") value *= 1024;
+    if (unit === "M") value *= 1024 * 1024;
+    if (unit === "B") value *= 1024 * 1024 * 1024;
+
+    return Math.round(value);
+  } catch (error) {
+    console.error(`Error fetching model ctx for ${model}:`, error);
+    return null;
+  }
+}
+
+
 export function countTokens(text: string): number {
   const enc = encoding_for_model("gpt-4");
   return enc.encode(text).length;
@@ -112,12 +139,21 @@ async function prepareOllamaChat(
 
   const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
   const ollama = createOllamaClientFromNode(node);
-  const ctx = options.num_ctx ? roundCtx(options.num_ctx, node.max_ctx) : undefined;
+  const model_max_ctx = await getModelsMaxCtx(model);
+  let max_ctx = node.max_ctx;
+  if (model_max_ctx !== null) {
+    if (model.includes("cloud")) {
+      max_ctx = model_max_ctx;
+    } else {
+      max_ctx = Math.min(node.max_ctx, model_max_ctx);
+    }
+  }
+  const ctx = options.num_ctx ? roundCtx(options.num_ctx, max_ctx) : undefined;
 
   const neededCtx = messages.reduce((acc, msg) => acc + countTokens(msg.content), 0);
   console.log(`Ollama ctx: ${ctx} (needed: ${neededCtx} + response) | model: ${model} | node: ${node.hostname}`);
 
-  const effectiveMax = ctx ?? node.max_ctx;
+  const effectiveMax = ctx ?? max_ctx;
   const truncatedMessages = neededCtx > effectiveMax
     ? truncateMessagesToFit(messages, effectiveMax)
     : messages;

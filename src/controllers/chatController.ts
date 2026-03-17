@@ -301,6 +301,50 @@ const getRag = async (
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// MODES — System message per mode
+// ─────────────────────────────────────────────────────────────────────────────
+
+const getSystemMessage = (
+  mode: "chat" | "malware" | "pentest",
+  rag: { limit: number; use_advanced: boolean; use_web_search: boolean }
+): OllamaMessage => {
+  const toolHints =
+    "You have access to tools: use get_current_date for date/time, " +
+    (rag.limit > 0 ? "get_knowledge to search internal documents, " : "") +
+    (rag.use_web_search ? "web_search to find current information on the web, " : "") +
+    (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
+    "Use tools whenever they would help answer the user's question more accurately.";
+
+  const base = "Your name is CerberusAI. Use user's language as output. When used something from RAG mention the source. ";
+
+  const prompts: Record<typeof mode, string> = {
+    chat:
+      base +
+      "You are a smart cybersecurity assistant. Help users with any cybersecurity topic — " +
+      "vulnerabilities, defenses, tools, concepts, and best practices. " +
+      toolHints,
+
+    malware:
+      base +
+      "You are a malware analysis advisor. Your goal is to help users detect, identify, and understand malware. " +
+      "Ask clarifying questions to gather more context (symptoms, behavior, file names, hashes, network activity, etc.) " +
+      "before drawing conclusions. Guide the user step by step through the analysis process. " +
+      "Never provide working malware code — focus purely on detection, recognition, and remediation. " +
+      toolHints,
+
+    pentest:
+      base +
+      "You are a penetration testing advisor. Help users plan and execute ethical penetration tests. " +
+      "Cover reconnaissance, scanning, exploitation, post-exploitation, and reporting phases. " +
+      "Always assume the user has proper authorization for the target. " +
+      "Recommend tools (nmap, Burp Suite, Metasploit, etc.) and explain techniques clearly. " +
+      toolHints,
+  };
+
+  return { role: "system", content: prompts[mode] ?? prompts.chat };
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TOOLS — Definition & execution
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -551,7 +595,17 @@ const streamAIMessage = async (
           completeRag = Knowledge.instance.deduplicateDocumentRows(completeRag);
           streamWrite(res, { rag_results: completeRag });
         }
-        clog.log("Stream", `Executed tool call: ${call.function.name} > "${args.query}" - ${result.rag_results.flat().length} chars`);
+        clog.log(
+          "Stream",
+          `Executed tool call: ${call.function.name} > "${args.query}" - ${
+            result.rag_results.flatMap(r => r.chunks).length
+          } chunks with average score ${
+            result.rag_results
+              .flatMap(r => r.chunks)
+              .reduce((total, chunk) => total + chunk.score, 0) / 
+            result.rag_results.flatMap(r => r.chunks).length
+          }`
+        );
         streamWrite(res, { generation_state: "executing_tools" });
       } else if (call.function.name === "web_search") {
         // ── WebSearch ─────────────────────────────────────────────────────────────────────
@@ -678,9 +732,10 @@ export const getChatMessages = async (req: Request, res: Response) => {
 
 export const postChatMessage = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { node_id, model, rag, content } = req.body as {
+  const { node_id, model, mode, rag, content } = req.body as {
     node_id: number,
     model: string,
+    mode: "chat" | "malware" | "pentest",
     rag: {limit: number, use_advanced: boolean, use_web_search: boolean},
     content: string};
   const user = (req as any).user;
@@ -711,18 +766,7 @@ export const postChatMessage = async (req: Request, res: Response) => {
       })();
     }
 
-    const systemMessage: OllamaMessage = {
-      role: "system",
-      content:
-        "Your name is CerberusAI and you must help people in cybersecurity. " +
-        "Use user's language as output. " +
-        "When used something from RAG promote from with source it is. " +
-        "You have access to tools: use get_current_date for date/time, " +
-        (rag.limit > 0 ? "get_knowledge to search internal documents, " : "") +
-        (rag.use_web_search ? "web_search to find current information on the web, " : "") +
-        (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
-        "Use tools whenever they would help answer the user's question more accurately."
-    };
+    const systemMessage: OllamaMessage = getSystemMessage(mode, rag);
 
     const history = await fetchChatHistory(chatId);
     const userMessage = await saveMessage(chatId, "user", user.id, content);

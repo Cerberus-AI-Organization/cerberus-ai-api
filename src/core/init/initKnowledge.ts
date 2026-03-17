@@ -68,15 +68,15 @@ async function ingestSources(node: ComputeNode) {
   for (const site of sites) {
     console.log(`[Knowledge] Started Crawl (${site})`);
     try {
-      const results = await crawlWeb(site);
-      await knowledge.addDocument(results.map(r => ({
-        text: r.text,
-        source: r.url
-      })), site, {
-        type: "web"
-      }, node);
-      for (const result of results) {
+      for await (const page of crawlWeb(site)) {
+        const documentPage: DocumentPage = {
+          text: page.text,
+          source: page.url
+        }
 
+        await knowledge.addDocument([documentPage], site, {
+          type: "web"
+        }, node);
       }
     } catch (err) {
       console.error(`Failed to Crawl [${site}]:`, err);

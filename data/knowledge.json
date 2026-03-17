@@ -1,9 +1,19 @@
 {
   "sites": [
+    "https://nukib.cz",
+    "https://attack.mitre.org",
+    "https://nvd.nist.gov",
+    "https://owasp.org/",
+    "https://www.nist.gov/cyberframework",
+    "https://www.cisa.gov/",
+    "https://www.mandiant.com/resources",
+    "https://www.crowdstrike.com/blog",
+    "https://cloud.google.com/security/resources"
   ],
   "documents": [
     "Sb_2025_264_PZZ.pdf",
     "videoprenaska-nzkb_uid_691ee0e537a80.pdf",
-    "zakonyprolidi_cs_2025_264_v20251101.pdf"
+    "zakonyprolidi_cs_2025_264_v20251101.pdf",
+    "NIST.CSWP.29.pdf"
   ]
 }

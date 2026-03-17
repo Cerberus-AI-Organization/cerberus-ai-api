@@ -26,7 +26,8 @@
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.624",
     "pg": "^8.16.3",
-    "tiktoken": "^1.0.22"
+    "tiktoken": "^1.0.22",
+    "turndown": "^7.2.2"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
@@ -36,6 +37,7 @@
     "@types/node": "^24.6.1",
     "@types/pdf-parse": "^1.1.5",
     "@types/pg": "^8.15.5",
+    "@types/turndown": "^5.0.6",
     "nodemon": "^3.1.10",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3"

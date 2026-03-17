@@ -9,7 +9,7 @@ export interface RerankedChunk extends DocumentChunk {
 export class DocumentReranker {
   async rerank(
     query: string,
-    chunks: DocumentChunk[],
+    chunks: RerankedChunk[],
     node: ComputeNode,
     model: string,
     topK: number
@@ -56,7 +56,7 @@ export class DocumentReranker {
 
           const logprobs = response.logprobs || [];
           if (response.logprobs == undefined) {
-            score = response.response.trim().toLowerCase().includes("yes") ? 0.6 : 0;
+            score = response.response.trim().toLowerCase().includes("yes") ? chunk.score : 0;
             console.log(`[Reranker]: No logprobs found in response, using score: ${score}`);
             break;
           }

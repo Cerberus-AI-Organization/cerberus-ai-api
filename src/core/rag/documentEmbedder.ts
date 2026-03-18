@@ -14,6 +14,9 @@ export class DocumentEmbedder {
       console.log(`Model ${EMBED_MODEL} pulled on node ${node.hostname}`);
     }
 
+    const needed_ctx = countTokens(text) + 250;
+    const max_ctx = await getMaxCtx(node, EMBED_MODEL);
+
     let remaining_attempts = 3;
     while (remaining_attempts > 0) {
       try {
@@ -22,13 +25,17 @@ export class DocumentEmbedder {
           prompt: text,
           keep_alive: Number(process.env.MODEL_KEEPALIVE) || 300,
           options: {
-            num_ctx: roundCtx(countTokens(text) + 250, await getMaxCtx(node, EMBED_MODEL)),
+            num_ctx: roundCtx(needed_ctx, max_ctx),
             num_gpu: node.max_layers_on_gpu,
           }
         });
 
         return result.embedding;
       } catch (error) {
+        if (error instanceof Error && error.message.includes("ResponseError: the input length exceeds the context length")) {
+          console.error(`[Embedder] Input length exceeds context length (Needed ${needed_ctx}/Max ${max_ctx}), retrying...`);
+          throw new Error("Input length exceeds context length");
+        }
         console.error("[Embedder] Error: ", error);
         remaining_attempts--;
       }

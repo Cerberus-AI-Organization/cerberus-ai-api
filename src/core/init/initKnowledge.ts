@@ -74,9 +74,13 @@ async function ingestSources(node: ComputeNode) {
           source: page.url
         }
 
-        await knowledge.addDocument([documentPage], documentPage.source, {
-          type: "web"
-        }, node);
+        try {
+          await knowledge.addDocument([documentPage], documentPage.source, {
+            type: "web"
+          }, node);
+        } catch (err) {
+          console.error(`Failed to add document [${documentPage.source}]:`, err);
+        }
       }
     } catch (err) {
       console.error(`Failed to Crawl [${site}]:`, err);

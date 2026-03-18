@@ -28,9 +28,12 @@ export class Knowledge {
   async init() {
     this.db = await lancedb.connect("./data/vector_db");
 
-    try {
+    const tableNames:string[] = await this.db.tableNames();
+
+    if (tableNames.includes("knowledge")) {
       this.table = await this.db.openTable("knowledge");
-    } catch {
+      await this.migrateSchema();
+    } else {
       this.table = await this.db.createTable("knowledge", [
         {
           vector: new Array(EMBED_DIM).fill(0),
@@ -39,8 +42,27 @@ export class Knowledge {
           page_source: "init",
           hash: "init",
           metadata: "{}",
+          added_at: 0,
         },
       ]);
+    }
+  }
+
+  private async migrateSchema() {
+    let somethingChanged = false;
+
+    try {
+      await this.table.query().select(["added_at"]).limit(1).toArray();
+    } catch {
+      console.log("[Knowledge] Migrating schema: Adding added_at column");
+      await this.table.addColumns([
+        { name: "added_at", valueSql: "0" },
+      ])
+      somethingChanged = true;
+    }
+
+    if (somethingChanged) {
+      console.log("[Knowledge] Migration complete");
     }
   }
 
@@ -56,6 +78,14 @@ export class Knowledge {
         console.log(`[Knowledge] Skipping "${source}" (unchanged)`);
         return;
       }
+
+      const age = Date.now() - (existing[0].added_at ?? 0)
+      const ttl = 1000 * 60 * 60 * 4;
+      if (age < ttl) {
+        console.log(`[Knowledge] Skipping "${source}" (too new, ${(age/1000)/60}min)`);
+        return;
+      }
+
       console.log(`[Knowledge] Updating "${source}"`);
       await this.table.delete(`source = '${source}'`);
     }

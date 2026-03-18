@@ -91,18 +91,34 @@ const SKIP_URL_PATTERNS = [
   // Legal & boilerplate
   /\/(privacy|terms|tos|legal|cookie|gdpr|disclaimer|license)(\/|$|\?)/i,
 
-  // Commerce
-  /\/(cart|checkout|order|payment|billing|invoice|subscription)(\/|$|\?)/i,
+  // Commerce & fundraising
+  /\/(cart|checkout|order|payment|billing|invoice|subscription|donate|store|shop)(\/|$|\?)/i,
 
   // Media & assets
   /\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|mp3|wav|zip|tar|gz|exe|dmg)(\?|$)/i,
 
-  // Utility pages
+  // Utility / nav-only pages
   /\/(search|tag|tags|category|categories|archive|archives|rss|feed|sitemap|404|500)(\/|\.|$|\?)/i,
-  /\/(print|embed|share|redirect)(\/|$|\?)/i,
+  /\/(print|embed|share|redirect|invite|contact-to-webmaster)(\/|$|\?)/i,
 
-  // Tracking & UTM-heavy URLs
-  /[?&](utm_|ref=|source=|campaign=|fbclid|gclid)/i,
+  // Tracking & UTM
+  /[?&](utm_|ref=|source=|campaign=|fbclid|gclid|reponame=)/i,
+
+  // CDN / proxy / infrastructure pages (nvd cdn-cgi, Cloudflare, etc.)
+  /\/cdn-cgi\//i,
+
+  // Interactive tools with no static text content
+  /\/(calculator|calc|widget|tool)(\/|$|\?)/i,
+  /\/(v[2-9]-calculator|v\d+\.\d+-calculator)(\/|$|\?)/i,
+
+  // API key request forms (form-only pages)
+  /\/request-an-api-key(\/|$|\?)/i,
+
+  // Statistics pages — highly dynamic, change every sync
+  /\/statistics(\/|$|\?)/i,
+
+  // Slack / community invite links
+  /slack\.com\/(invite|join)/i,
 
   // Locales that duplicate content
   /\/(zh|ja|ko|ar|he|fa|ru|uk|pl|cs|sk|ro|bg|hr|sr)(\/|$)/i,

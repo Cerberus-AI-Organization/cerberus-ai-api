@@ -17,78 +17,97 @@ interface CrawlResult {
 export async function* crawlWeb(
   startUrl: string,
   maxDepth: number = 2,
-  visited = new Set<string>()
 ): AsyncGenerator<CrawlResult> {
+  const visited = new Set<string>();
+  const queue: Array<{ url: string; depth: number }> = [{ url: startUrl, depth: maxDepth }];
 
-  if (maxDepth < 0 || visited.has(startUrl)) return;
-  visited.add(startUrl);
+  while (queue.length > 0) {
+    const { url, depth } = queue.shift()!;
 
-  try {
-    console.log(`[Crawling] ${startUrl} (Remaining depth: ${maxDepth})`);
+    if (visited.has(url) || depth < 0) continue;
+    visited.add(url);
 
-    const res = await fetch(startUrl);
-    if (!res.ok) return;
+    try {
+      console.log(`[Crawler] ${url} (Remaining depth: ${depth})`);
+      const res = await fetch(url);
+      if (!res.ok) continue;
 
-    const contentType = res.headers.get("content-type") || "";
+      const contentType = res.headers.get("content-type") || "";
 
-    if (contentType.includes("application/pdf") || startUrl.endsWith(".pdf")) {
-      const pages = await parsePDFFromUrl(startUrl);
-
-      for (const page of pages) {
-        yield {
-          url: startUrl,
-          text: page
-        };
+      if (contentType.includes("application/pdf") || url.endsWith(".pdf")) {
+        const pages = await parsePDFFromUrl(url);
+        for (const page of pages) yield { url, text: page };
+        continue;
       }
-      return;
+
+      const html = await res.text();
+      const $ = cheerio.load(html);
+
+      const main = $("main").length ? $("main") : $("article").length ? $("article") : $("body");
+      const cleanHtml = main.clone();
+      cleanHtml.find("script, style, nav, footer, header, aside, noscript, svg, img, form, button").remove();
+
+      let markdown = turndown.turndown(cleanHtml.html() || "");
+      markdown = cleanMarkdown(markdown);
+
+      yield { url, text: markdown };  // ← yield, pak zahodíme HTML z paměti
+
+      if (depth === 0) continue;
+
+      const baseUrl = new URL(url);
+      let count = 0;
+
+      $("a[href]").each((_, el) => {
+        if (count >= 20) return;
+        const href = $(el).attr("href");
+        if (!href) return;
+        try {
+          const abs = new URL(href, url);
+          abs.hash = "";
+          const absStr = abs.toString();
+          if (
+            abs.hostname === baseUrl.hostname &&
+            abs.protocol.startsWith("http") &&
+            !visited.has(absStr) &&
+            !shouldSkipUrl(absStr)
+          ) {
+            queue.push({ url: absStr, depth: depth - 1 });
+            count++;
+          }
+        } catch {}
+      });
+
+    } catch (err) {
+      console.error(`[Crawler] Failed to crawl ${url}`, err);
     }
-
-    // 🌐 HTML
-    const html = await res.text();
-    const $ = cheerio.load(html);
-
-    const main = $("main").length ? $("main") : $("article").length ? $("article") : $("body");
-    const cleanHtml = main.clone();
-    cleanHtml.find(`script, style, nav, footer, header, aside, noscript, svg, img, form, button`).remove();
-
-    const htmlContent = cleanHtml.html() || "";
-
-    let markdown = turndown.turndown(htmlContent);
-    markdown = cleanMarkdown(markdown);
-
-    yield { url: startUrl, text: markdown };
-
-    if (maxDepth === 0) return;
-
-    const baseUrl = new URL(startUrl);
-    const links = new Set<string>();
-
-    $("a[href]").each((_, el) => {
-      const href = $(el).attr("href");
-      if (!href) return;
-
-      try {
-        const absoluteUrl = new URL(href, startUrl);
-        if (
-          absoluteUrl.hostname === baseUrl.hostname &&
-          absoluteUrl.protocol.startsWith("http")
-        ) {
-          absoluteUrl.hash = "";
-          links.add(absoluteUrl.toString());
-        }
-      } catch {}
-    });
-
-    const MAX_LINKS_PER_PAGE = 20;
-    let count = 0;
-
-    for (const link of links) {
-      if (count++ > MAX_LINKS_PER_PAGE) break;
-
-      yield* crawlWeb(link, maxDepth - 1, visited);
-    }
-
-  } catch (err) {
-    console.error(`Failed to crawl ${startUrl}`, err);
   }
+}
+
+const SKIP_URL_PATTERNS = [
+  // Auth & account
+  /\/(login|logout|signin|signup|register|auth|oauth|password|reset|verify|confirm)(\/|$|\?)/i,
+  /\/(account|profile|settings|preferences|dashboard)(\/|$|\?)/i,
+
+  // Legal & boilerplate
+  /\/(privacy|terms|tos|legal|cookie|gdpr|disclaimer|license)(\/|$|\?)/i,
+
+  // Commerce
+  /\/(cart|checkout|order|payment|billing|invoice|subscription)(\/|$|\?)/i,
+
+  // Media & assets
+  /\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|mp3|wav|zip|tar|gz|exe|dmg)(\?|$)/i,
+
+  // Utility pages
+  /\/(search|tag|tags|category|categories|archive|archives|rss|feed|sitemap|404|500)(\/|$|\?)/i,
+  /\/(print|embed|share|redirect)(\/|$|\?)/i,
+
+  // Tracking & UTM-heavy URLs
+  /[?&](utm_|ref=|source=|campaign=|fbclid|gclid)/i,
+
+  // Locales that duplicate content
+  /\/(zh|ja|ko|ar|he|fa|ru|uk|pl|cs|sk|ro|bg|hr|sr)(\/|$)/i,
+];
+
+function shouldSkipUrl(url: string): boolean {
+  return SKIP_URL_PATTERNS.some((pattern) => pattern.test(url));
 }

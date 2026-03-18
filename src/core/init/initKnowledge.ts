@@ -74,7 +74,7 @@ async function ingestSources(node: ComputeNode) {
           source: page.url
         }
 
-        await knowledge.addDocument([documentPage], site, {
+        await knowledge.addDocument([documentPage], documentPage.source, {
           type: "web"
         }, node);
       }

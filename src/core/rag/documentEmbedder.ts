@@ -19,7 +19,7 @@ export class DocumentEmbedder {
       prompt: text,
       keep_alive: Number(process.env.MODEL_KEEPALIVE) || 300,
       options: {
-        num_ctx: roundCtx(countTokens(text) + 100, node.max_ctx),
+        num_ctx: roundCtx(countTokens(text) + 250, node.max_ctx),
         num_gpu: node.max_layers_on_gpu,
       }
     });

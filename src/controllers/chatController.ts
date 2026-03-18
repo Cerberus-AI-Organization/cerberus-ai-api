@@ -309,8 +309,8 @@ const getSystemMessage = (
   rag: { limit: number; use_advanced: boolean; use_web_search: boolean }
 ): OllamaMessage => {
   const toolHints =
-    "You have access to tools: use get_current_date for date/time, " +
-    (rag.limit > 0 ? "get_knowledge to search internal documents, " : "") +
+    "You have access to tools: use get_current_date for date/time use this tool user asks for actual data so you know what is the current date and time, " +
+    (rag.limit > 0 ? "get_knowledge to search internal documents use this tool as first source of information, " : "") +
     (rag.use_web_search ? "web_search to find current information on the web, " : "") +
     (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
     "Use tools whenever they would help answer the user's question more accurately.";

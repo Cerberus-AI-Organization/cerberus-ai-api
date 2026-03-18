@@ -5,7 +5,7 @@ import * as path from "path";
 import { ComputeNode } from "../../types/computeNode";
 import { DocumentChunker } from "./documentChunker";
 import { DocumentEmbedder, EMBED_DIM } from "./documentEmbedder";
-import {ChunkRow, DocumentChunk, DocumentPage, DocumentRow, IndexedSource} from "./types";
+import {ChunkRow, DocumentPage, DocumentRow, IndexedSource} from "./types";
 import {DocumentReranker, RerankedChunk} from "./documentReranker";
 
 export class Knowledge {
@@ -79,7 +79,7 @@ export class Knowledge {
         return;
       }
 
-      const age = Date.now() - (existing[0].added_at ?? 0)
+      const age = Date.now() - Number(existing[0].added_at ?? 0)
       const ttl = 1000 * 60 * 60 * 4;
       if (age < ttl) {
         console.log(`[Knowledge] Skipping "${source}" (too new, ${(age/1000)/60}min)`);
@@ -103,6 +103,7 @@ export class Knowledge {
         page_source: chunk.page_source,
         hash,
         metadata: metadataStr,
+        added_at: Date.now(),
       });
       console.log(`[Knowledge] Embedded ${i + 1}/${chunks.length} chunks`);
     }

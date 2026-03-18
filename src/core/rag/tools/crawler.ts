@@ -104,17 +104,17 @@ const SKIP_URL_PATTERNS = [
   // Tracking & UTM
   /[?&](utm_|ref=|source=|campaign=|fbclid|gclid|reponame=)/i,
 
-  // CDN / proxy / infrastructure pages (nvd cdn-cgi, Cloudflare, etc.)
+  // CDN / proxy / infrastructure pages
   /\/cdn-cgi\//i,
 
-  // Interactive tools with no static text content
+  // Interactive tools
   /\/(calculator|calc|widget|tool)(\/|$|\?)/i,
   /\/(v[2-9]-calculator|v\d+\.\d+-calculator)(\/|$|\?)/i,
 
-  // API key request forms (form-only pages)
+  // API key request forms
   /\/request-an-api-key(\/|$|\?)/i,
 
-  // Statistics pages — highly dynamic, change every sync
+  // Statistics pages
   /\/statistics(\/|$|\?)/i,
 
   // Slack / community invite links
@@ -122,7 +122,11 @@ const SKIP_URL_PATTERNS = [
 
   // Locales that duplicate content
   /\/(zh|ja|ko|ar|he|fa|ru|uk|pl|cs|sk|ro|bg|hr|sr)(\/|$)/i,
+
+  // Low Value Pages
+  /\/(chapters|supporters)(\/|$|\?)/i,
 ];
+
 
 function shouldSkipUrl(url: string): boolean {
   return SKIP_URL_PATTERNS.some((pattern) => pattern.test(url));

@@ -98,7 +98,7 @@ const SKIP_URL_PATTERNS = [
   /\.(jpg|jpeg|png|gif|webp|svg|ico|mp4|mp3|wav|zip|tar|gz|exe|dmg)(\?|$)/i,
 
   // Utility pages
-  /\/(search|tag|tags|category|categories|archive|archives|rss|feed|sitemap|404|500)(\/|$|\?)/i,
+  /\/(search|tag|tags|category|categories|archive|archives|rss|feed|sitemap|404|500)(\/|\.|$|\?)/i,
   /\/(print|embed|share|redirect)(\/|$|\?)/i,
 
   // Tracking & UTM-heavy URLs

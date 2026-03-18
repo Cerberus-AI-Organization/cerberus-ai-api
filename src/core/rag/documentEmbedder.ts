@@ -16,7 +16,7 @@ export class DocumentEmbedder {
 
     const tokens = countTokens(text);
     const buffer = Math.max(250, Math.floor(tokens * 0.1));
-    const needed_ctx = tokens + buffer;
+    let needed_ctx = tokens + buffer;
     const max_ctx = await getMaxCtx(node, EMBED_MODEL);
 
     let errors = []
@@ -41,6 +41,7 @@ export class DocumentEmbedder {
 
           if (error.message.includes("input length exceeds the context length")) {
             console.error(`[Embedder] Input length exceeds context length (Needed ${needed_ctx}/Max ${max_ctx}), retrying...`);
+            needed_ctx *= 2
           } else {
             console.error("[Embedder] Error: ", error);
           }

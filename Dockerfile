@@ -7,4 +7,4 @@ COPY . .
 RUN npm run build
 
 EXPOSE 8080
-CMD ["node", "dist/index.js"]
+CMD ["node", "--max-old-space-size=4096", "dist/index.js"]

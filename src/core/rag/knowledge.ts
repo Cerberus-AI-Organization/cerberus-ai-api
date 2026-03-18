@@ -93,10 +93,11 @@ export class Knowledge {
     const chunks = this.chunker.createChunks(pages, source);
     const metadataStr = JSON.stringify(metadata);
 
-    const rows = [];
+    const BATCH_SIZE = 10;
+    let batch = [];
 
     for (const [i, chunk] of chunks.entries()) {
-      rows.push({
+      batch.push({
         vector: await this.embedder.embed(chunk.text, node),
         text: chunk.text,
         source,
@@ -106,9 +107,14 @@ export class Knowledge {
         added_at: Date.now(),
       });
       console.log(`[Knowledge] Embedded ${i + 1}/${chunks.length} chunks`);
+
+      if (batch.length >= BATCH_SIZE) {
+        await this.table.add(batch);
+        batch = [];
+      }
     }
 
-    if (rows.length > 0) await this.table.add(rows);
+    if (batch.length > 0) await this.table.add(batch);
     console.log(`[Knowledge] Added "${source}" → ${chunks.length} chunks`);
   }
 
@@ -157,7 +163,7 @@ export class Knowledge {
   async getAllIndexedSources(): Promise<IndexedSource[]> {
     const entries = await this.table
       .query()
-      .select(["source", "hash", "metadata", "text", "page_source"])
+      .select(["source", "hash", "metadata", "page_source"])
       .toArray();
 
     const grouped = new Map<string, IndexedSource>();

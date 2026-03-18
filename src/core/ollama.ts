@@ -53,6 +53,16 @@ export async function getModelsMaxCtx(model: string): Promise<number | null> {
   }
 }
 
+export async function getMaxCtx(node: ComputeNode, model: string): Promise<number> {
+  const maxCtx = await getModelsMaxCtx(model);
+  if (!maxCtx) return node.max_ctx;
+
+  if (model.includes("cloud")) {
+    return maxCtx;
+  }
+
+  return Math.min(maxCtx, node.max_ctx);
+}
 
 export function countTokens(text: string): number {
   const enc = encoding_for_model("gpt-4");
@@ -139,15 +149,7 @@ async function prepareOllamaChat(
 
   const keep_alive = Number(process.env.MODEL_KEEPALIVE) || 300;
   const ollama = createOllamaClientFromNode(node);
-  const model_max_ctx = await getModelsMaxCtx(model);
-  let max_ctx = node.max_ctx;
-  if (model_max_ctx !== null) {
-    if (model.includes("cloud")) {
-      max_ctx = model_max_ctx;
-    } else {
-      max_ctx = Math.min(node.max_ctx, model_max_ctx);
-    }
-  }
+  const max_ctx = await getMaxCtx(node, model);
   const ctx = options.num_ctx ? roundCtx(options.num_ctx, max_ctx) : undefined;
 
   const neededCtx = messages.reduce((acc, msg) => acc + countTokens(msg.content), 0);

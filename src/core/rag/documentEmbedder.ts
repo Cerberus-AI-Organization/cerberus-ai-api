@@ -1,4 +1,4 @@
-import {countTokens, createOllamaClientFromNode, haveModel, roundCtx} from "../ollama";
+import {countTokens, createOllamaClientFromNode, getMaxCtx, haveModel, roundCtx} from "../ollama";
 import { ComputeNode } from "../../types/computeNode";
 
 export const EMBED_MODEL = "qwen3-embedding:4b";
@@ -14,15 +14,26 @@ export class DocumentEmbedder {
       console.log(`Model ${EMBED_MODEL} pulled on node ${node.hostname}`);
     }
 
-    const result = await ollama.embeddings({
-      model: EMBED_MODEL,
-      prompt: text,
-      keep_alive: Number(process.env.MODEL_KEEPALIVE) || 300,
-      options: {
-        num_ctx: roundCtx(countTokens(text) + 250, node.max_ctx),
-        num_gpu: node.max_layers_on_gpu,
+    let remaining_attempts = 3;
+    while (remaining_attempts > 0) {
+      try {
+        const result = await ollama.embeddings({
+          model: EMBED_MODEL,
+          prompt: text,
+          keep_alive: Number(process.env.MODEL_KEEPALIVE) || 300,
+          options: {
+            num_ctx: roundCtx(countTokens(text) + 250, await getMaxCtx(node, EMBED_MODEL)),
+            num_gpu: node.max_layers_on_gpu,
+          }
+        });
+
+        return result.embedding;
+      } catch (error) {
+        console.error("[Embedder] Error: ", error);
+        remaining_attempts--;
       }
-    });
-    return result.embedding;
+    }
+
+    throw new Error("Failed to embed document after 3 attempts");
   }
 }

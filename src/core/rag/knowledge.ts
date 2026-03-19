@@ -8,6 +8,12 @@ import { DocumentEmbedder, EMBED_DIM } from "./documentEmbedder";
 import {ChunkRow, DocumentPage, DocumentRow, IndexedSource} from "./types";
 import {DocumentReranker, RerankedChunk} from "./documentReranker";
 
+export const KNOWLEDGE_UPDATE_INTERVAL: number = (() => {
+  const interval = process.env.KNOWLEDGE_UPDATE_INTERVAL ?? "12";
+  if (interval === "-1") return -1;
+  return Number(interval) * 60 * 60 * 1000;
+})();
+
 export class Knowledge {
   static #instance: Knowledge;
 

@@ -13,7 +13,7 @@ import chatRoutes from './routes/chatRoutes';
 import {refreshNodeStatuses} from "./controllers/computeNodeController";
 import {initKnowledge, syncKnowledge} from "./core/init/initKnowledge";
 import knowledgeRoutes from "./routes/knowledgeRoutes";
-import {Knowledge} from "./core/rag/knowledge";
+import {Knowledge, KNOWLEDGE_UPDATE_INTERVAL} from "./core/rag/knowledge";
 import {initNodes} from "./core/init/initNodes";
 
 dotenv.config();
@@ -39,6 +39,7 @@ if (!process.env.JWT_SECRET) {
 }
 
 async function main(app: express.Application) {
+  // Initialize database
   await initDatabase();
   console.log('✅  DB initialized');
 
@@ -47,13 +48,17 @@ async function main(app: express.Application) {
   await initNodes()
   setInterval(refreshNodeStatuses, 15 * 1000);
 
-  initKnowledge().then(() => {
-    console.log('✅  Knowledge initialized');
-  }).catch(err => {
-    console.error('❌  Knowledge failed to initialize:', err);
-  });
-  setInterval(syncKnowledge, 12 * 60 * 60 * 1000);
-
+  // Initialize knowledge
+  if (KNOWLEDGE_UPDATE_INTERVAL > 0) {
+    initKnowledge().then(() => {
+      console.log('✅  Knowledge initialized');
+    }).catch(err => {
+      console.error('❌  Knowledge failed to initialize:', err);
+    });
+    setInterval(syncKnowledge, KNOWLEDGE_UPDATE_INTERVAL);
+  } else {
+    console.log("⚠️ Knowledge update disabled")
+  }
 
   createServer(app);
 }

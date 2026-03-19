@@ -96,6 +96,11 @@ export class Knowledge {
       await this.table.delete(`source = '${source}'`);
     }
 
+    if (node.status !== "online") {
+      console.log(`[Knowledge] Skipping "${source}" (node offline)`);
+      return;
+    }
+
     const chunks = this.chunker.createChunks(pages, source);
     const metadataStr = JSON.stringify(metadata);
 

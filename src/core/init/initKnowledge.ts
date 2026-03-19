@@ -37,11 +37,15 @@ async function getAvailableNode(): Promise<ComputeNode> {
   return node;
 }
 
-async function ingestSources(node: ComputeNode) {
+export async function syncKnowledge() {
   const knowledge = Knowledge.instance;
   const { sites, documents } = loadSources();
 
   for (const doc of documents) {
+    const node = await getAvailableNode();
+    if (!node) throw new Error("No online compute node found");
+    console.log(`[Knowledge] Using node: ${node.hostname} (${node.ip}) for document: ${doc}`);
+
     console.log(`[Knowledge] Started Parsing of Document (${doc})`);
     try {
       if (doc.endsWith(".pdf")) {
@@ -66,6 +70,10 @@ async function ingestSources(node: ComputeNode) {
   }
 
   for (const site of sites) {
+    const node = await getAvailableNode();
+    if (!node) throw new Error("No online compute node found");
+    console.log(`[Knowledge] Using node: ${node.hostname} (${node.ip}) for site: ${site}`);
+
     console.log(`[Knowledge] Started Crawl (${site})`);
     try {
       for await (const page of crawlWeb(site)) {
@@ -93,13 +101,4 @@ export async function initKnowledge() {
   console.log("Knowledge singleton initialized.");
 
   await syncKnowledge();
-}
-
-export async function syncKnowledge() {
-  const node = await getAvailableNode();
-  console.log(`Sync started on node: ${node.hostname} (${node.ip})`);
-
-  await ingestSources(node);
-
-  console.log("Knowledge synchronization complete.");
 }

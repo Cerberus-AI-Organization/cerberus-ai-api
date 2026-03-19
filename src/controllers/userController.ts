@@ -87,6 +87,10 @@ export const updateUser = async (req: Request, res: Response) => {
     // user může update jen sám sebe, admin kohokoliv
     if (currentUser.role !== 'admin' && parseInt(id) !== currentUser.id) {
         return res.status(403).json({ message: 'Not authorized to update this user' });
+    } else if (currentUser.role !== 'admin' && parseInt(id) === currentUser.id) {
+      if (email || role) {
+        return res.status(403).json({ message: 'Not authorized to update email or role' });
+      }
     }
 
     try {
@@ -120,6 +124,36 @@ export const updateUser = async (req: Request, res: Response) => {
         res.status(500).json({ message: 'Error updating user' });
     }
 };
+
+export const updateUserPassword = async (req: Request, res: Response) => {
+    const currentUser = (req as any).user;
+    const { id } = req.params;
+    const { old_password, new_password } = req.body;
+
+    if (currentUser.role !== 'admin' && parseInt(id) !== currentUser.id) {
+        return res.status(403).json({ message: 'Not authorized to update this user' });
+    }
+
+    try {
+        const user = await pool.query<User>('SELECT * FROM users WHERE id=$1', [id]);
+        if (user.rowCount === 0) {
+            return res.status(404).json({ message: 'User not found' });
+        }
+
+        const isMatch = await bcrypt.compare(old_password, user.rows[0].password);
+        if (!isMatch) {
+            return res.status(400).json({ message: 'Old password is incorrect' });
+        }
+
+        const hashedPassword = await bcrypt.hash(new_password, 10);
+        await pool.query('UPDATE users SET password=$1 WHERE id=$2', [hashedPassword, id]);
+
+        res.json({ message: 'Password updated successfully' });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: 'Error updating password' });
+    }
+}
 
 // DELETE user (only admin)
 export const deleteUser = async (req: Request, res: Response) => {

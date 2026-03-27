@@ -772,24 +772,6 @@ export const postChatMessage = async (req: Request, res: Response) => {
     const userMessage = await saveMessage(chatId, "user", user.id, content);
     streamWrite(res, { message: userMessage });
 
-    let ragMessage: OllamaMessage | null = null;
-    // if (Number(rag_limit) > 0) {
-    //   streamWrite(res, { generation_state: "preparing_rag" });
-    //   clog.log("RAG", `Retrieving context — limit: ${rag_limit}, advanced: ${rag_advanced}`);
-    //
-    //   const ragContext: OllamaMessage[] = [...history, { role: "user", content }];
-    //   const rag = await getRag(ragContext, Number(rag_limit), Boolean(rag_advanced), node, model, clog);
-    //
-    //   ragMessage = {
-    //     role: "system",
-    //     content: `Use these information's (RAG) if relevant: ${rag.rag_formated}`,
-    //   };
-    //
-    //   if (rag.rag_results.length > 0) {
-    //     streamWrite(res, { rag_results: rag.rag_results });
-    //   }
-    // }
-
     streamWrite(res, { generation_state: "generating" });
     const generatedContent = await streamAIMessage(
       content, systemMessage, history, rag, node, model, res, clog

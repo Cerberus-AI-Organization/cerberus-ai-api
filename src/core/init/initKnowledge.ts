@@ -44,7 +44,7 @@ export async function syncKnowledge() {
   for (const doc of documents) {
     const node = await getAvailableNode();
     if (!node) throw new Error("No online compute node found");
-    console.log(`[Knowledge] Using node: ${node.hostname} (${node.ip}) for document: ${doc}`);
+    console.log(`[Knowledge] Using node: ${node.hostname} (${node.url}) for document: ${doc}`);
 
     console.log(`[Knowledge] Started Parsing of Document (${doc})`);
     try {
@@ -72,7 +72,7 @@ export async function syncKnowledge() {
   for (const site of sites) {
     const node = await getAvailableNode();
     if (!node) throw new Error("No online compute node found");
-    console.log(`[Knowledge] Using node: ${node.hostname} (${node.ip}) for site: ${site}`);
+    console.log(`[Knowledge] Using node: ${node.hostname} (${node.url}) for site: ${site}`);
 
     console.log(`[Knowledge] Started Crawl (${site})`);
     try {

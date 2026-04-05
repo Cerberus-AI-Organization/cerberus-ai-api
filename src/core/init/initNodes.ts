@@ -1,14 +1,14 @@
-import {ComputeNode} from "../../types/computeNode";
-import {pool} from "../database";
-import {createOllamaClientFromNode} from "../ollama";
-import {EMBED_MODEL} from "../rag/documentEmbedder";
+import { ComputeNode } from '../../types/computeNode';
+import { pool } from '../database';
+import { createNodeProvider } from '../providers';
+import { OLLAMA_EMBED_MODEL } from '../rag/documentEmbedder';
 
 async function getAvailableNodes(): Promise<ComputeNode[]> {
   const res = await pool.query(
     "SELECT * FROM compute_nodes WHERE status = 'online' ORDER BY priority DESC"
   );
   const nodes = res.rows;
-  if (!nodes) throw new Error("No online compute node found");
+  if (!nodes) throw new Error('No online compute node found');
   return nodes;
 }
 
@@ -16,21 +16,25 @@ export async function initNodes() {
   const nodes = await getAvailableNodes();
   console.log(`Found ${nodes.length} online compute nodes`);
 
-  const requiredModels = [
-    EMBED_MODEL,
-  ];
-
   let someModelsMissing = false;
   for (const node of nodes) {
-    try {
-      const ollama = createOllamaClientFromNode(node);
-      const models = (await ollama.list()).models.map(m => m.name);
+    const provider = createNodeProvider(node);
 
-      for (const req_model of requiredModels) {
-        if (!models.some(model => model === req_model)) {
-          console.log(`Model ${req_model} not found on node ${node.hostname}, pulling...`);
-          await ollama.pull({ model: req_model });
-          console.log(`Model ${req_model} pulled on node ${node.hostname}`);
+    // Model pre-pull only makes sense for Ollama nodes
+    if (!provider.canManageModels()) {
+      console.log(`Node ${node.hostname} (${node.api_type}) — skipping model check`);
+      continue;
+    }
+
+    try {
+      const models = (await provider.listModels()).map(m => m.name);
+
+      for (const requiredModel of [OLLAMA_EMBED_MODEL]) {
+        if (!models.some(m => m === requiredModel)) {
+          console.log(`Model ${requiredModel} not found on node ${node.hostname}, pulling...`);
+          const stream = await provider.pullModel(requiredModel);
+          for await (const _chunk of stream) { /* drain stream */ }
+          console.log(`Model ${requiredModel} pulled on node ${node.hostname}`);
         }
       }
     } catch (err) {
@@ -39,5 +43,5 @@ export async function initNodes() {
     }
   }
 
-  console.log(!someModelsMissing ? "✅  Nodes initialized" : "⚠️  Some nodes failed to initialize");
+  console.log(!someModelsMissing ? '✅  Nodes initialized' : '⚠️  Some nodes failed to initialize');
 }

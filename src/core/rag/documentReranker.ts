@@ -1,6 +1,7 @@
-import {countTokens, createOllamaClientFromNode, haveModel, roundCtx} from "../ollama";
-import { ComputeNode } from "../../types/computeNode";
-import { DocumentChunk } from "./types";
+import { countTokens, roundCtx } from '../AIHelpers';
+import { ComputeNode } from '../../types/computeNode';
+import { DocumentChunk } from './types';
+import { createNodeProvider } from '../providers';
 
 export interface RerankedChunk extends DocumentChunk {
   score: number;
@@ -14,14 +15,7 @@ export class DocumentReranker {
     model: string,
     topK: number
   ): Promise<RerankedChunk[]> {
-    const ollama = createOllamaClientFromNode(node);
-
-    if (!(await haveModel(node, model))) {
-      console.log(`Model ${model} not found on node ${node.hostname}, pulling...`);
-      await ollama.pull({ model: model });
-      console.log(`Model ${model} pulled on node ${node.hostname}`);
-    }
-
+    const provider = createNodeProvider(node);
     const scoredChunks: RerankedChunk[] = [];
 
     for (const chunk of chunks) {
@@ -35,40 +29,34 @@ export class DocumentReranker {
           : `Relevant? Respond with exactly one word, either "Yes" or "No".\nQuery: ${query}\nDocument: ${chunk.text}`;
 
         try {
-          const response = await ollama.generate({
-            model: model,
-            prompt: currentPrompt,
-            stream: false,
-            keep_alive: Number(process.env.MODEL_KEEPALIVE) || 300,
-            think: false,
+          const response = await provider.generate(model, currentPrompt, {
+            temperature: 0,
+            stop: ['\n'],
+            num_predict: model.includes('cloud') ? undefined : 10,
+            num_ctx: roundCtx(countTokens(currentPrompt) + 10, node.max_ctx),
+            num_gpu: node.max_layers_on_gpu,
             logprobs: true,
-            options: {
-              temperature: 0,
-              stop: ["\n"],
-              num_predict: model.includes("cloud") ? undefined : 10,
-              num_ctx: roundCtx(countTokens(currentPrompt) + 10, node.max_ctx),
-              num_gpu: node.max_layers_on_gpu,
-            },
-          }).catch(err => {
-            console.error("Error running Ollama sync", err);
-            throw err;
+            top_logprobs: 5,
+            think: false,
           });
 
-          const logprobs = response.logprobs || [];
-          if (response.logprobs == undefined) {
-            score = response.response.trim().toLowerCase().includes("yes") ? chunk.score : 0;
+          const logprobs = response.logprobs ?? [];
+
+          if (logprobs.length === 0) {
+            score = response.response.trim().toLowerCase().includes('yes') ? chunk.score : 0;
             console.log(`[Reranker]: No logprobs found in response, using score: ${score}`);
             break;
           }
 
-          const index = logprobs.findIndex(p => p.token.toLowerCase() === "yes" || p.token === "no");
+          const index = logprobs.findIndex(
+            p => p.token.toLowerCase() === 'yes' || p.token.toLowerCase() === 'no'
+          );
 
-          if (index != -1) {
+          if (index !== -1) {
             const topTokenObj = logprobs[index];
-            const tokenText = topTokenObj?.token?.trim().toLowerCase() || "";
-
+            const tokenText = topTokenObj?.token?.trim().toLowerCase() ?? '';
             const probability = Math.exp(topTokenObj.logprob);
-            score = tokenText === "yes" ? probability : (1 - probability);
+            score = tokenText === 'yes' ? probability : 1 - probability;
             break;
           } else {
             console.log(`[Reranker]: No "Yes" or "No" found in response, retrying...`);
@@ -78,9 +66,8 @@ export class DocumentReranker {
           attempts++;
 
           if (attempts >= maxAttempts) {
-            score = response.response.toLowerCase().includes("yes") ? 0.5 : 0;
+            score = response.response.toLowerCase().includes('yes') ? 0.5 : 0;
           }
-
         } catch (error) {
           console.error(`[Reranker]: Error:`, error);
           score = 0;

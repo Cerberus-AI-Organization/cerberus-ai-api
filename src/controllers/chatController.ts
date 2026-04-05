@@ -1,14 +1,14 @@
 import {Request, Response} from "express";
 import {pool} from "../core/database";
-import {checkOnline} from "./computeNodeController";
-import {getNodeById} from "./ollamaController";
+import {checkNodeOnline} from "./computeNodeController";
+import {getNodeById} from "./modelController";
 import {
   countTokens,
-  createOllamaClientFromNode,
   type OllamaMessage,
-  runOllamaStream,
-  runOllamaSync
-} from "../core/ollama";
+  runAIStream,
+  runAISync
+} from "../core/AIHelpers";
+import {createNodeProvider} from "../core/providers";
 import {Message} from "../types/message";
 import {Knowledge} from "../core/rag/knowledge";
 import {ComputeNode} from "../types/computeNode";
@@ -76,9 +76,9 @@ const extractTitle = (content: string): string => {
 
 const validateNodeStatus = async (nodeId: number): Promise<ComputeNode> => {
   const node = await getNodeById(nodeId);
-  const status = await checkOnline(node.ip, node.port);
+  const status = await checkNodeOnline(node);
   if (status === "offline") {
-    throw new Error(`Node #${nodeId} (${node.ip}:${node.port}) is offline`);
+    throw new Error(`Node #${nodeId} (${node.url}) is offline`);
   }
   log("Node", `Node #${nodeId} is online`);
   return node;
@@ -130,7 +130,7 @@ const generateChatTitle = async (
     { role: "user", content: `Create title for: [${content.slice(0, 300)}]` },
   ];
 
-  const response = await runOllamaSync(nodeId, model, prompt, {
+  const response = await runAISync(nodeId, model, prompt, {
     think: false,
     num_ctx: 512,
     temperature: 0.8,
@@ -224,7 +224,7 @@ Do not output anything outside the XML.`,
   const MAX_RETRIES = 3;
 
   for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const response = await runOllamaSync(node.id, model, messages, {
+    const response = await runAISync(node.id, model, messages, {
       think: "medium",
       num_ctx: num_ctx,
     }).catch((err) => {
@@ -436,20 +436,13 @@ const getKnowledge = async (
 }
 
 const webSearch = async (query: string, limit: number, node: ComputeNode): Promise<WebSearchResult[]> => {
-  const ollama = createOllamaClientFromNode(node);
-  const response = await ollama.webSearch({
-    query: query,
-    maxResults: 5
-  });
-
-  return response.results
+  const provider = createNodeProvider(node);
+  return provider.webSearch(query, limit);
 }
 
 const webFetch = async (url: string, node: ComputeNode): Promise<WebFetchResponse> => {
-  const ollama = createOllamaClientFromNode(node);
-  return await ollama.webFetch({
-    url: url,
-  });
+  const provider = createNodeProvider(node);
+  return provider.webFetch(url);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -499,11 +492,13 @@ const streamAIMessage = async (
   const MAX_RESPONSE_TOKENS = 1000;
   const MAX_TOOL_ITERATIONS = 10;
 
+  const provider = createNodeProvider(node);
+
   const neededTools = ["get_current_date"];
   if (rag.limit > 0) {
     neededTools.push("get_knowledge");
   }
-  if (rag.use_web_search) {
+  if (rag.use_web_search && provider.supportsWebSearch()) {
     neededTools.push("web_search", "web_fetch");
   }
   const tools = getTools(neededTools);
@@ -530,7 +525,7 @@ const streamAIMessage = async (
     const completeMessagesTexts = messages.map((m) => m.content).join("\n")
     let num_ctx = countTokens(completeMessagesTexts) + MAX_RESPONSE_TOKENS;
 
-    for await (const chunk of runOllamaStream(node.id, model, messages, {
+    for await (const chunk of runAIStream(node.id, model, messages, {
       think: true,
       num_ctx,
       temperature: 0.4,

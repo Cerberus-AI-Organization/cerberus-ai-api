@@ -23,6 +23,7 @@
     "jsonwebtoken": "^9.0.2",
     "node-fetch": "^3.3.2",
     "ollama": "^0.6.3",
+    "openai": "^6.33.0",
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.624",
     "pg": "^8.16.3",

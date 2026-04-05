@@ -1,5 +1,5 @@
 import { Router } from "express";
-import {listModels, pullModel, deleteModel, stopModel, preloadModel} from "../controllers/ollamaController";
+import {listModels, pullModel, deleteModel, stopModel, preloadModel} from "../controllers/modelController";
 import { authenticateToken } from "../middleware/authMiddleware";
 
 const router = Router();

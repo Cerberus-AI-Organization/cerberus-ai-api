@@ -11,7 +11,7 @@ import computeNodeRoutes from './routes/computeNodesRoutes';
 import ollamaRoutes from './routes/ollamaRoutes';
 import chatRoutes from './routes/chatRoutes';
 import {refreshNodeStatuses} from "./controllers/computeNodeController";
-import {initKnowledge, syncKnowledge} from "./core/init/initKnowledge";
+import {syncKnowledge} from "./core/init/initKnowledge";
 import knowledgeRoutes from "./routes/knowledgeRoutes";
 import {Knowledge, KNOWLEDGE_UPDATE_INTERVAL} from "./core/rag/knowledge";
 import {initNodes} from "./core/init/initNodes";
@@ -49,15 +49,21 @@ async function main(app: express.Application) {
   setInterval(refreshNodeStatuses, 15 * 1000);
 
   // Initialize knowledge
+  await Knowledge.instance.init();
+  console.log('✅  Knowledge initialized');
+
   if (KNOWLEDGE_UPDATE_INTERVAL > 0) {
-    initKnowledge().then(() => {
-      console.log('✅  Knowledge initialized');
-    }).catch(err => {
-      console.error('❌  Knowledge failed to initialize:', err);
-    });
+    syncKnowledge()
+      .then(() => {
+        console.info('✅  Knowledge sync completed');
+      })
+      .catch(err => {
+      console.error('❌  Knowledge sync failed:', err);
+      }
+    );
     setInterval(syncKnowledge, KNOWLEDGE_UPDATE_INTERVAL);
   } else {
-    console.log("⚠️ Knowledge update disabled")
+    console.log("⚠️ Knowledge sync disabled")
   }
 
   createServer(app);

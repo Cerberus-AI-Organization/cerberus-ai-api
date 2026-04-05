@@ -1,6 +1,6 @@
 import {Request, Response} from "express";
 import {Knowledge} from "../core/rag/knowledge";
-import {getNodeById} from "./modelController";
+import {getNodeById} from "./computeNodeController";
 
 export const getKnowledge = async (req: Request, res: Response) => {
   try {

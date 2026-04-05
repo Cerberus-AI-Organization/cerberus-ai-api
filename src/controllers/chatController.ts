@@ -1,7 +1,7 @@
 import {Request, Response} from "express";
 import {pool} from "../core/database";
 import {checkNodeOnline} from "./computeNodeController";
-import {getNodeById} from "./modelController";
+import {getNodeById} from "./computeNodeController";
 import {
   countTokens,
   type OllamaMessage,

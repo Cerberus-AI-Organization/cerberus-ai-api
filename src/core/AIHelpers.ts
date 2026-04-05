@@ -2,7 +2,7 @@ import { Tool, ToolCall } from 'ollama';
 import { ComputeNode } from '../types/computeNode';
 import { encoding_for_model } from 'tiktoken';
 import { createNodeProvider } from './providers';
-import { getNodeById } from '../controllers/modelController';
+import { getNodeById } from '../controllers/computeNodeController';
 import { OllamaCompatMessage, RunOptions } from './providers/AINodeProvider';
 
 // Re-export types used by controllers / RAG

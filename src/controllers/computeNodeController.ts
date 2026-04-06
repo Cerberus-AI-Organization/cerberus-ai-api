@@ -92,7 +92,7 @@ export const addComputeNode = async (req: Request, res: Response) => {
 
 export const updateComputeNode = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { hostname, url, api_type, api_key } = req.body;
+  const { hostname, url, api_type, api_key, priority, max_ctx, max_layers_on_gpu } = req.body;
   const user = (req as any).user;
 
   if (user.role !== 'admin') {
@@ -106,9 +106,9 @@ export const updateComputeNode = async (req: Request, res: Response) => {
       url,
       api_type: (api_type ?? 'ollama') as 'ollama' | 'openai',
       api_key: api_key ?? null,
-      priority: 0,
-      max_ctx: 4096,
-      max_layers_on_gpu: -1,
+      priority: priority ?? 0,
+      max_ctx: max_ctx ?? 4096,
+      max_layers_on_gpu: max_layers_on_gpu ?? -1,
       added_by: null,
       status: 'offline',
       created_at: new Date(),

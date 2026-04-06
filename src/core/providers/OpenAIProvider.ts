@@ -1,4 +1,7 @@
 import OpenAI from 'openai';
+import fetch from 'node-fetch';
+import * as cheerio from 'cheerio';
+import TurndownService from 'turndown';
 import { ToolCall, WebFetchResponse, WebSearchResult } from 'ollama';
 import { ComputeNode } from '../../types/computeNode';
 import {
@@ -9,6 +12,12 @@ import {
   OllamaCompatMessage,
   RunOptions,
 } from './AINodeProvider';
+import { cleanMarkdown } from '../rag/tools/markdownUtils';
+
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+});
 
 // ── Message format conversion ─────────────────────────────────────────────────
 // Ollama uses tool_name on tool-result messages and stores tool_call ids in
@@ -108,7 +117,7 @@ export class OpenAIProvider extends AINodeProvider {
   // ── Capabilities ──────────────────────────────────────────────────────────
 
   canManageModels(): boolean { return false; }
-  supportsWebSearch(): boolean { return false; }
+  supportsWebSearch(): boolean { return !!process.env.BRAVE_SEARCH_API_KEY; }
 
   // ── Online check ──────────────────────────────────────────────────────────
 
@@ -221,6 +230,63 @@ export class OpenAIProvider extends AINodeProvider {
   async embed(text: string, model: string): Promise<number[]> {
     const response = await this.client.embeddings.create({ model, input: text });
     return response.data[0].embedding;
+  }
+
+  // ── Web tools ─────────────────────────────────────────────────────────────
+
+  async webSearch(query: string, maxResults: number): Promise<WebSearchResult[]> {
+    const apiKey = process.env.BRAVE_SEARCH_API_KEY;
+    if (!apiKey) throw new Error('BRAVE_SEARCH_API_KEY is not set');
+
+    const url = new URL('https://api.search.brave.com/res/v1/web/search');
+    url.searchParams.set('q', query);
+    url.searchParams.set('count', String(maxResults));
+
+    const res = await fetch(url.toString(), {
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip',
+        'X-Subscription-Token': apiKey,
+      },
+    });
+
+    if (!res.ok) throw new Error(`Brave Search API error: ${res.status} ${res.statusText}`);
+
+    const data = await res.json() as any;
+    const results: any[] = data?.web?.results ?? [];
+
+    return results.map(r => ({
+      content: `Title: ${r.title ?? ''}\nURL: ${r.url ?? ''}\nDescription: ${r.description ?? ''}`,
+    }));
+  }
+
+  async webFetch(url: string): Promise<WebFetchResponse> {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`webFetch error: ${res.status} ${res.statusText}`);
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const title = $('title').text().trim();
+
+    const links: string[] = [];
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (!href) return;
+      try {
+        const abs = new URL(href, url);
+        if (abs.protocol.startsWith('http')) links.push(abs.toString());
+      } catch {}
+    });
+
+    const main = $('main').length ? $('main') : $('article').length ? $('article') : $('body');
+    const cleanHtml = main.clone();
+    cleanHtml.find('script, style, nav, footer, header, aside, noscript, svg, img, form, button').remove();
+
+    let content = turndown.turndown(cleanHtml.html() || '');
+    content = cleanMarkdown(content);
+
+    return { title, url, content, links };
   }
 
   // ── Generate (for reranker) ───────────────────────────────────────────────

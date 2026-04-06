@@ -39,60 +39,65 @@ async function getAvailableNode(): Promise<ComputeNode> {
 
 export async function syncKnowledge() {
   const knowledge = Knowledge.instance;
-  const { sites, documents } = loadSources();
+  knowledge.syncing = true;
+  try {
+    const { sites, documents } = loadSources();
 
-  for (const doc of documents) {
-    const node = await getAvailableNode();
-    if (!node) throw new Error("No online compute node found");
-    console.log(`[Knowledge] Using node: ${node.hostname} (${node.url}) for document: ${doc}`);
+    for (const doc of documents) {
+      const node = await getAvailableNode();
+      if (!node) throw new Error("No online compute node found");
+      console.log(`[Knowledge] Using node: ${node.hostname} (${node.url}) for document: ${doc}`);
 
-    console.log(`[Knowledge] Started Parsing of Document (${doc})`);
-    try {
-      if (doc.endsWith(".pdf")) {
-        const pages = await parsePDF(join(process.cwd(), "data", doc));
-        const documentPages: DocumentPage[] = []
-        pages.forEach((page, index) => {
-          documentPages.push({
-            text: page,
-            source: `${doc} Page ${index + 1}`,
+      console.log(`[Knowledge] Started Parsing of Document (${doc})`);
+      try {
+        if (doc.endsWith(".pdf")) {
+          const pages = await parsePDF(join(process.cwd(), "data", doc));
+          const documentPages: DocumentPage[] = []
+          pages.forEach((page, index) => {
+            documentPages.push({
+              text: page,
+              source: `${doc} Page ${index + 1}`,
+            })
           })
-        })
-        await knowledge.addDocument(documentPages, doc, {
-          name: doc,
-          type: "pdf"
-        }, node);
-      } else {
-        console.log("Not Supported: ", doc, " - must be .pdf file extension. Skipping...")
-      }
-    } catch (err) {
-      console.error(`Failed to Ingest Document [${doc}]:`, err);
-    }
-  }
-
-  for (const site of sites) {
-    const node = await getAvailableNode();
-    if (!node) throw new Error("No online compute node found");
-    console.log(`[Knowledge] Using node: ${node.hostname} (${node.url}) for site: ${site}`);
-
-    console.log(`[Knowledge] Started Crawl (${site})`);
-    try {
-      for await (const page of crawlWeb(site)) {
-        const documentPage: DocumentPage = {
-          text: page.text,
-          source: page.url
-        }
-
-        try {
-          await knowledge.addDocument([documentPage], documentPage.source, {
-            type: "web"
+          await knowledge.addDocument(documentPages, doc, {
+            name: doc,
+            type: "pdf"
           }, node);
-        } catch (err) {
-          console.error(`Failed to add document [${documentPage.source}]:`, err);
+        } else {
+          console.log("Not Supported: ", doc, " - must be .pdf file extension. Skipping...")
         }
+      } catch (err) {
+        console.error(`Failed to Ingest Document [${doc}]:`, err);
       }
-    } catch (err) {
-      console.error(`Failed to Crawl [${site}]:`, err);
     }
+
+    for (const site of sites) {
+      const node = await getAvailableNode();
+      if (!node) throw new Error("No online compute node found");
+      console.log(`[Knowledge] Using node: ${node.hostname} (${node.url}) for site: ${site}`);
+
+      console.log(`[Knowledge] Started Crawl (${site})`);
+      try {
+        for await (const page of crawlWeb(site)) {
+          const documentPage: DocumentPage = {
+            text: page.text,
+            source: page.url
+          }
+
+          try {
+            await knowledge.addDocument([documentPage], documentPage.source, {
+              type: "web"
+            }, node);
+          } catch (err) {
+            console.error(`Failed to add document [${documentPage.source}]:`, err);
+          }
+        }
+      } catch (err) {
+        console.error(`Failed to Crawl [${site}]:`, err);
+      }
+    }
+  } finally {
+    knowledge.syncing = false;
   }
 }
 

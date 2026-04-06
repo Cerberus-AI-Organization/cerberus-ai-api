@@ -22,10 +22,19 @@ export class Knowledge {
 
   private db: any;
   private table: any;
+  #syncing = false;
 
   private readonly chunker = new DocumentChunker();
   private readonly embedder = new DocumentEmbedder();
   private readonly reranker = new DocumentReranker();
+
+  get syncing(): boolean {
+    return this.#syncing;
+  }
+
+  set syncing(value: boolean) {
+    this.#syncing = value;
+  }
 
   public static get instance(): Knowledge {
     if (!Knowledge.#instance) {

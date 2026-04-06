@@ -15,6 +15,7 @@ import computeNodeRoutes from './routes/computeNodesRoutes';
 import ollamaRoutes from './routes/ollamaRoutes';
 import chatRoutes from './routes/chatRoutes';
 import knowledgeRoutes from './routes/knowledgeRoutes';
+import apiRoutes from "./routes/apiRoutes";
 
 dotenv.config();
 
@@ -78,10 +79,7 @@ async function scheduleKnowledgeSync() {
 }
 
 function registerRoutes(app: express.Application) {
-  app.get('/', (_req: Request, res: Response) => {
-    res.json({ message: 'Cerberus AI API is running' });
-  });
-
+  app.use('/', apiRoutes);
   app.use('/auth', authRoutes);
   app.use('/users', userRoutes);
   app.use('/compute-nodes', computeNodeRoutes);

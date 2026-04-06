@@ -118,9 +118,12 @@ export const updateComputeNode = async (req: Request, res: Response) => {
 
     const result = await pool.query<ComputeNode>(
       `UPDATE compute_nodes
-       SET hostname=$1, url=$2, api_type=$3, api_key=$4, status=$5
-       WHERE id=$6 RETURNING *`,
-      [hostname, url, api_type ?? 'ollama', api_key ?? null, status, id]
+       SET hostname=$1, url=$2, api_type=$3, api_key=$4, priority=$5, max_ctx=$6, max_layers_on_gpu=$7, status=$8
+       WHERE id=$9 RETURNING *`,
+      [tempNode.hostname, tempNode.url,
+        tempNode.api_type, tempNode.api_key,
+        tempNode.priority, tempNode.max_ctx,
+        tempNode.max_layers_on_gpu, status, id]
     );
 
     if (result.rowCount === 0) {

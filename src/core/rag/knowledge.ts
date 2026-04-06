@@ -8,10 +8,13 @@ import { DocumentEmbedder, EMBED_DIM } from "./documentEmbedder";
 import {ChunkRow, DocumentPage, DocumentRow, IndexedSource} from "./types";
 import {DocumentReranker, RerankedChunk} from "./documentReranker";
 
-export const KNOWLEDGE_UPDATE_INTERVAL: number = (() => {
-  const interval = process.env.KNOWLEDGE_UPDATE_INTERVAL ?? "12";
-  if (interval === "-1") return -1;
-  return Number(interval) * 60 * 60 * 1000;
+export const KNOWLEDGE_SYNC_HOURS: number[] = (() => {
+  const val = process.env.KNOWLEDGE_SYNC_HOURS ?? "0";
+  if (val === "-1") return [];
+  return val
+    .split(",")
+    .map(h => parseInt(h.trim(), 10))
+    .filter(h => !isNaN(h) && h >= 0 && h <= 23);
 })();
 
 export class Knowledge {
@@ -169,6 +172,11 @@ export class Knowledge {
     console.log(`[Knowledge] Reranked to ${reranked.length} chunks`);
 
     return this.groupChunksBySourceRerank(reranked, vectorChunks);
+  }
+
+  async isEmpty(): Promise<boolean> {
+    const entries = await this.table.query().select(["source"]).limit(2).toArray();
+    return entries.every((e: any) => e.source === "init");
   }
 
   async getAllIndexedSources(): Promise<IndexedSource[]> {

@@ -155,14 +155,14 @@ export class OpenAIProvider extends AINodeProvider {
       messages: msgs,
       stream: false,
       tools: toOpenAITools(options.tools),
-      max_tokens: options.num_predict,
+      max_completion_tokens: options.num_predict,
       temperature: options.temperature,
     });
 
     const choice = response.choices[0];
     return {
       content: choice.message.content ?? '',
-      thinking: '',
+      thinking: (choice.message as any).reasoning ?? '',
       tool_calls: normalizeOpenAIToolCalls(choice.message.tool_calls),
       done: true,
     };
@@ -176,7 +176,7 @@ export class OpenAIProvider extends AINodeProvider {
       messages: msgs,
       stream: true,
       tools: toOpenAITools(options.tools),
-      max_tokens: options.num_predict,
+      max_completion_tokens: options.num_predict,
       temperature: options.temperature,
     });
 
@@ -218,7 +218,7 @@ export class OpenAIProvider extends AINodeProvider {
 
       yield {
         content: delta?.content ?? '',
-        thinking: '',
+        thinking: (delta as any)?.reasoning ?? '',
         tool_calls: toolCalls,
         done,
       };

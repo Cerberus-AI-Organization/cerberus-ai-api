@@ -27,6 +27,7 @@
     "pdf-parse": "^2.4.5",
     "pdfjs-dist": "^5.4.624",
     "pg": "^8.16.3",
+    "socket.io": "^4.8.3",
     "tiktoken": "^1.0.22",
     "turndown": "^7.2.2"
   },

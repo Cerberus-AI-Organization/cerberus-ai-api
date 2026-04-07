@@ -9,6 +9,8 @@ import { initNodes } from './core/init/initNodes';
 import { syncKnowledge } from './core/init/initKnowledge';
 import { refreshNodeStatuses } from './controllers/computeNodeController';
 import { Knowledge, KNOWLEDGE_SYNC_HOURS } from './core/rag/knowledge';
+import { initWebSocket } from './core/websocket';
+import * as JobManager from './core/JobManager';
 import authRoutes from './routes/authRoutes';
 import userRoutes from './routes/usersRoutes';
 import computeNodeRoutes from './routes/computeNodesRoutes';
@@ -93,16 +95,24 @@ function startServer(app: express.Application) {
   const sslKey = process.env.SSL_KEY_PATH;
   const sslCert = process.env.SSL_CERT_PATH;
 
+  let server: http.Server | https.Server;
+
   if (sslKey && sslCert && fs.existsSync(sslKey) && fs.existsSync(sslCert)) {
     const httpsOptions = { key: fs.readFileSync(sslKey), cert: fs.readFileSync(sslCert) };
-    https.createServer(httpsOptions, app).listen(PORT, () => {
+    server = https.createServer(httpsOptions, app);
+    server.listen(PORT, () => {
       console.log(`🔒 HTTPS Server running on https://localhost:${PORT}`);
     });
   } else {
-    http.createServer(app).listen(PORT, () => {
+    server = http.createServer(app);
+    server.listen(PORT, () => {
       console.log(`🔓 HTTP Server running on http://localhost:${PORT}`);
     });
   }
+
+  const io = initWebSocket(server);
+  JobManager.init(io);
+  setInterval(() => JobManager.cleanupStaleJobs(), 60_000);
 }
 
 async function main() {

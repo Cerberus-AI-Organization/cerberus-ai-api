@@ -2,6 +2,7 @@ import {Request, Response} from "express";
 import {pool} from "../core/database";
 import {checkNodeOnline} from "./computeNodeController";
 import {getNodeById} from "./computeNodeController";
+import * as JobManager from "../core/JobManager";
 import {
   countTokens,
   type OllamaMessage,
@@ -34,20 +35,6 @@ const createLogger = (chatId: number | string) => ({
   warn:  (scope: string, msg: string, data?: unknown) => warn(`${scope} #${chatId}`, msg, data),
   error: (scope: string, msg: string, err?: unknown)  => error(`${scope} #${chatId}`, msg, err),
 });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS — Streaming
-// ─────────────────────────────────────────────────────────────────────────────
-
-const setupStreamingHeaders = (res: Response) => {
-  res.setHeader("Content-Type", "application/x-ndjson");
-  res.setHeader("Transfer-Encoding", "chunked");
-  res.flushHeaders();
-};
-
-const streamWrite = (res: Response, payload: Record<string, unknown>) => {
-  res.write(JSON.stringify(payload) + "\n");
-};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS — Text processing
@@ -486,7 +473,7 @@ const streamAIMessage = async (
   rag: {limit: number, use_advanced: boolean, use_web_search: boolean},
   node: ComputeNode,
   model: string,
-  res: Response,
+  emit: (payload: Record<string, unknown>) => void,
   clog: ReturnType<typeof createLogger>
 ): Promise<string> => {
   const MAX_RESPONSE_TOKENS = 1000;
@@ -533,12 +520,12 @@ const streamAIMessage = async (
     })) {
       if (chunk.thinking) {
         thinking += chunk.thinking;
-        streamWrite(res, { generated_think: chunk.thinking });
+        emit({ generated_think: chunk.thinking });
       }
 
       if (chunk.content) {
         content += chunk.content;
-        streamWrite(res, { generated_chunk: chunk.content });
+        emit({ generated_chunk: chunk.content });
       }
 
       if (chunk.tool_calls.length) {
@@ -551,7 +538,7 @@ const streamAIMessage = async (
 
       if (currentState !== lastState) {
         lastState = currentState;
-        streamWrite(res, { generation_state: currentState });
+        emit({ generation_state: currentState });
       }
     }
 
@@ -559,7 +546,7 @@ const streamAIMessage = async (
       messages.push({ role: 'assistant', thinking, content, tool_calls: toolCalls })
     }
 
-    streamWrite(res, { generated_think: "\n<end-iteration />\n" });
+    emit({ generated_think: "\n<end-iteration />\n" });
 
     // ── No tool calls → model is done ─────────────────────────────────────
     if (toolCalls.length === 0) {
@@ -569,7 +556,7 @@ const streamAIMessage = async (
     }
 
     // ── Execute tool calls ─────────────────────────────────────────────────
-    streamWrite(res, { generation_state: "executing_tools" });
+    emit({ generation_state: "executing_tools" });
     clog.log("Stream", `Executing ${toolCalls.length} tool call(s)`);
 
     for (const call of toolCalls) {
@@ -580,7 +567,7 @@ const streamAIMessage = async (
         clog.log("Stream", `Executed tool call: ${call.function.name} - ${result}`);
       } else if (call.function.name === "get_knowledge") {
         // ── GetKnowledge ─────────────────────────────────────────────────────────────────────
-        streamWrite(res, { generation_state: "preparing_rag" });
+        emit({ generation_state: "preparing_rag" });
         const args = call.function.arguments as { query: string }
         const result = await getKnowledge(args.query, node, model, rag.limit, rag.use_advanced);
         messages.push({ role: 'tool', tool_name: call.function.name, content: result.rag_formated } )
@@ -588,7 +575,7 @@ const streamAIMessage = async (
         if (result.rag_results.length > 0) {
           completeRag = [...completeRag, ...result.rag_results]
           completeRag = Knowledge.instance.deduplicateDocumentRows(completeRag);
-          streamWrite(res, { rag_results: completeRag });
+          emit({ rag_results: completeRag });
         }
         clog.log(
           "Stream",
@@ -597,11 +584,11 @@ const streamAIMessage = async (
           } chunks with average score ${
             result.rag_results
               .flatMap(r => r.chunks)
-              .reduce((total, chunk) => total + chunk.score, 0) / 
+              .reduce((total, chunk) => total + chunk.score, 0) /
             result.rag_results.flatMap(r => r.chunks).length
           }`
         );
-        streamWrite(res, { generation_state: "executing_tools" });
+        emit({ generation_state: "executing_tools" });
       } else if (call.function.name === "web_search") {
         // ── WebSearch ─────────────────────────────────────────────────────────────────────
         const args = call.function.arguments as { query: string }
@@ -630,7 +617,7 @@ const streamAIMessage = async (
       }
     }
 
-    streamWrite(res, { generation_state: "generating" });
+    emit({ generation_state: "generating" });
   }
 
   if (iteration >= MAX_TOOL_ITERATIONS && !finalContent) {
@@ -725,6 +712,50 @@ export const getChatMessages = async (req: Request, res: Response) => {
   }
 };
 
+const runGenerationJob = async (
+  jobId: string,
+  chatId: number,
+  chatObject: any,
+  isNewChat: boolean,
+  node: ComputeNode,
+  model: string,
+  mode: "chat" | "malware" | "pentest",
+  rag: {limit: number, use_advanced: boolean, use_web_search: boolean},
+  content: string,
+  userId: number,
+): Promise<void> => {
+  const clog = createLogger(chatId);
+  const emit = (payload: Record<string, unknown>) => JobManager.appendChunk(jobId, payload);
+
+  emit({ generation_state: "thinking" });
+
+  if (isNewChat) {
+    emit({ chat: chatObject });
+
+    generateChatTitle(node.id, model, content).then(async (title) => {
+      await pool.query(`UPDATE chats SET title = $1 WHERE id = $2`, [title, chatId]);
+      chatObject.title = title;
+      emit({ chat: chatObject });
+    }).catch((err) => {
+      clog.error("Chat", "Title generation failed, using fallback", err);
+    });
+  }
+
+  const systemMessage: OllamaMessage = getSystemMessage(mode, rag);
+  const history = await fetchChatHistory(chatId);
+
+  emit({ generation_state: "generating" });
+  const generatedContent = await streamAIMessage(
+    content, systemMessage, history, rag, node, model, emit, clog
+  );
+
+  const aiMessage = await saveMessage(chatId, "ai", null, generatedContent);
+  emit({ generated_message: aiMessage });
+
+  clog.log("Chat", `Generation job ${jobId} complete`);
+  JobManager.completeJob(jobId);
+};
+
 export const postChatMessage = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { node_id, model, mode, rag, content } = req.body as {
@@ -740,49 +771,26 @@ export const postChatMessage = async (req: Request, res: Response) => {
 
     const node = await validateNodeStatus(Number(node_id));
 
-    setupStreamingHeaders(res);
-    streamWrite(res, { generation_state: "thinking" });
-
     const { chatId, isNewChat, chatObject } = await resolveChatSession(id, user.id);
-    const clog = createLogger(chatId);
 
-    let titlePromise: Promise<void> | undefined;
-    if (isNewChat) {
-      streamWrite(res, { chat: chatObject });
-
-      titlePromise = (async () => {
-        const title = await generateChatTitle(node.id, model, content).catch((err) => {
-          clog.error("Chat", "Title generation failed, using fallback", err);
-          return `Chat ${chatObject.id}`;
-        });
-        await pool.query(`UPDATE chats SET title = $1 WHERE id = $2`, [title, chatId]);
-        chatObject.title = title;
-        streamWrite(res, { chat: chatObject });
-      })();
-    }
-
-    const systemMessage: OllamaMessage = getSystemMessage(mode, rag);
-
-    const history = await fetchChatHistory(chatId);
     const userMessage = await saveMessage(chatId, "user", user.id, content);
-    streamWrite(res, { message: userMessage });
 
-    streamWrite(res, { generation_state: "generating" });
-    const generatedContent = await streamAIMessage(
-      content, systemMessage, history, rag, node, model, res, clog
-    );
+    const job = JobManager.createJob(chatId, user.id);
 
-    const aiMessage = await saveMessage(chatId, "ai", null, generatedContent);
-    streamWrite(res, { generated_message: aiMessage });
+    res.json({
+      jobId: job.id,
+      chat: chatObject,
+      userMessage: userMessage,
+    });
 
-    if (titlePromise) await titlePromise;
-
-    clog.log("Chat", `Message exchange complete`);
-    res.end();
+    runGenerationJob(job.id, chatId, chatObject, isNewChat, node, model, mode, rag, content, user.id)
+      .catch((err: any) => {
+        error("Chat", `Generation job ${job.id} failed`, { message: err.message, stack: err.stack });
+        JobManager.failJob(job.id, err.message);
+      });
   } catch (err: any) {
     error("Chat", `postChatMessage failed — chat ${id}`, { message: err.message, stack: err.stack });
-    streamWrite(res, { error: err.message });
-    res.end();
+    res.status(500).json({ error: err.message });
   }
 };
 

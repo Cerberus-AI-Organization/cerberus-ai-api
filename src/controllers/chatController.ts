@@ -728,17 +728,10 @@ const runGenerationJob = async (
   const emit = (payload: Record<string, unknown>) => JobManager.appendChunk(jobId, payload);
 
   emit({ generation_state: "thinking" });
+  let titleJob: Promise<string>|null = null;
 
   if (isNewChat) {
-    emit({ chat: chatObject });
-
-    generateChatTitle(node.id, model, content).then(async (title) => {
-      await pool.query(`UPDATE chats SET title = $1 WHERE id = $2`, [title, chatId]);
-      chatObject.title = title;
-      emit({ chat: chatObject });
-    }).catch((err) => {
-      clog.error("Chat", "Title generation failed, using fallback", err);
-    });
+    titleJob = generateChatTitle(node.id, model, content);
   }
 
   const systemMessage: OllamaMessage = getSystemMessage(mode, rag);
@@ -751,6 +744,13 @@ const runGenerationJob = async (
 
   const aiMessage = await saveMessage(chatId, "ai", null, generatedContent);
   emit({ generated_message: aiMessage });
+
+  if (titleJob) {
+    const title = await titleJob;
+    await pool.query(`UPDATE chats SET title = $1 WHERE id = $2`, [title, chatId]);
+    chatObject.title = title;
+    emit({ chat: chatObject });
+  }
 
   clog.log("Chat", `Generation job ${jobId} complete`);
   JobManager.completeJob(jobId);

@@ -1,5 +1,5 @@
 import { Request, Response } from 'express';
-import { Knowledge } from '../core/rag/knowledge';
+import { Knowledge } from '../core/rag/Knowledge';
 
 export const getApiInfo = async (req: Request, res: Response) => {
     const knowledge = Knowledge.instance;

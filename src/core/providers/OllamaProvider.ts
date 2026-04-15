@@ -8,7 +8,7 @@ import {
   OllamaCompatMessage,
   RunOptions,
 } from './AINodeProvider';
-import { countTokens, getMaxCtx, roundCtx, truncateMessagesToFit } from '../AIHelpers';
+import { countTokens, getMaxCtx, roundCtx, truncateMessagesToFit } from '../aiHelpers';
 
 export class OllamaProvider extends AINodeProvider {
   private readonly ollama: Ollama;

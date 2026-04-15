@@ -1,4 +1,4 @@
-import { countTokens, roundCtx } from '../AIHelpers';
+import { countTokens, roundCtx } from '../aiHelpers';
 import { ComputeNode } from '../../types/computeNode';
 import { DocumentChunk } from './types';
 import { createNodeProvider } from '../providers';

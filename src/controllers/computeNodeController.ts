@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { pool } from '../core/database';
 import { ComputeNode } from '../types/computeNode';
 import { createNodeProvider } from '../core/providers';
-import { initKnowledge } from '../core/init/initKnowledge';
+import { initKnowledge } from '../core/init';
 
 export async function getNodeById(id: number): Promise<ComputeNode> {
   const result = await pool.query('SELECT * FROM compute_nodes WHERE id = $1', [id]);

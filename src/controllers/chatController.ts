@@ -2,16 +2,16 @@ import {Request, Response} from "express";
 import {pool} from "../core/database";
 import {checkNodeOnline} from "./computeNodeController";
 import {getNodeById} from "./computeNodeController";
-import * as JobManager from "../core/JobManager";
+import * as JobManager from "../core/jobManager";
 import {
   countTokens,
   type OllamaMessage,
   runAIStream,
   runAISync
-} from "../core/AIHelpers";
+} from "../core/aiHelpers";
 import {createNodeProvider} from "../core/providers";
 import {Message} from "../types/message";
-import {Knowledge} from "../core/rag/knowledge";
+import {Knowledge} from "../core/rag/Knowledge";
 import {ComputeNode} from "../types/computeNode";
 import {DocumentRow} from "../core/rag/types";
 import {encoding_for_model} from "tiktoken";

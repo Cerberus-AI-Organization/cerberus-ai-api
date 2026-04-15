@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import {checkNodeOnline, getNodeById} from './computeNodeController';
 import { createNodeProvider } from '../core/providers';
-import { runAISync } from '../core/AIHelpers';
+import { runAISync } from '../core/aiHelpers';
 
 export const listModels = async (req: Request, res: Response) => {
   try {

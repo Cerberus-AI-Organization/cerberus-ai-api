@@ -3,10 +3,10 @@ import * as crypto from "crypto";
 import * as fs from "fs";
 import * as path from "path";
 import { ComputeNode } from "../../types/computeNode";
-import { DocumentChunker } from "./documentChunker";
-import { DocumentEmbedder, EMBED_DIM } from "./documentEmbedder";
+import { DocumentChunker } from "./DocumentChunker";
+import { DocumentEmbedder, EMBED_DIM } from "./DocumentEmbedder";
 import {ChunkRow, DocumentPage, DocumentRow, IndexedSource} from "./types";
-import {DocumentReranker, RerankedChunk} from "./documentReranker";
+import {DocumentReranker, RerankedChunk} from "./DocumentReranker";
 
 export const KNOWLEDGE_SYNC_HOURS: number[] = (() => {
   const val = process.env.KNOWLEDGE_SYNC_HOURS ?? "0";

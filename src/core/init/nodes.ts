@@ -1,7 +1,7 @@
 import { ComputeNode } from '../../types/computeNode';
 import { pool } from '../database';
 import { createNodeProvider } from '../providers';
-import { OLLAMA_EMBED_MODEL } from '../rag/documentEmbedder';
+import { OLLAMA_EMBED_MODEL } from '../rag/DocumentEmbedder';
 
 async function getAvailableNodes(): Promise<ComputeNode[]> {
   const res = await pool.query(

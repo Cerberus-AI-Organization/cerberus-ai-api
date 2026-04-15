@@ -2,7 +2,7 @@ import http from 'http';
 import https from 'https';
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
-import * as JobManager from './JobManager';
+import * as JobManager from './jobManager';
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 

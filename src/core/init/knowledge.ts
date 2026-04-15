@@ -1,4 +1,4 @@
-import {Knowledge} from "../rag/knowledge";
+import {Knowledge} from "../rag/Knowledge";
 import {crawlWeb} from "../rag/tools/crawler";
 import {parsePDF} from "../rag/tools/pdfparser";
 import { join } from "path";

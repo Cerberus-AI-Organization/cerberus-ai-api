@@ -16,23 +16,8 @@ type Logger = {
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Context helpers
+// Context helper
 // ─────────────────────────────────────────────────────────────────────────────
-
-export const truncateRagToFitContext = (
-  ragMessage: OllamaMessage,
-  availableTokens: number,
-  clog: Logger
-): OllamaMessage => {
-  const truncatedWarning = '\n[RAG truncated due to context limit]';
-  const enc = encoding_for_model('gpt-4');
-  const encoded = enc.encode(ragMessage.content);
-  const truncated = encoded.slice(0, availableTokens - countTokens(truncatedWarning));
-  const decoded = new TextDecoder().decode(enc.decode(truncated));
-
-  clog.warn('Stream', `RAG truncated from ${encoded.length} to ${truncated.length} tokens`);
-  return { ...ragMessage, content: decoded + truncatedWarning };
-};
 
 export const buildMessageContext = (
   systemMessage: OllamaMessage,

@@ -1,7 +1,6 @@
 import OpenAI from 'openai';
 import fetch from 'node-fetch';
 import * as cheerio from 'cheerio';
-import TurndownService from 'turndown';
 import { ToolCall, WebFetchResponse, WebSearchResult } from 'ollama';
 import { ComputeNode } from '../../types/computeNode';
 import {
@@ -12,12 +11,7 @@ import {
   OllamaCompatMessage,
   RunOptions,
 } from './AINodeProvider';
-import { cleanMarkdown } from '../rag/tools/markdownUtils';
-
-const turndown = new TurndownService({
-  headingStyle: 'atx',
-  codeBlockStyle: 'fenced',
-});
+import { htmlToMarkdown } from '../rag/tools/markdownUtils';
 
 // ── Message format conversion ─────────────────────────────────────────────────
 // Ollama uses tool_name on tool-result messages and stores tool_call ids in
@@ -279,12 +273,7 @@ export class OpenAIProvider extends AINodeProvider {
       } catch {}
     });
 
-    const main = $('main').length ? $('main') : $('article').length ? $('article') : $('body');
-    const cleanHtml = main.clone();
-    cleanHtml.find('script, style, nav, footer, header, aside, noscript, svg, img, form, button').remove();
-
-    let content = turndown.turndown(cleanHtml.html() || '');
-    content = cleanMarkdown(content);
+    const content = htmlToMarkdown(html);
 
     return { title, url, content, links };
   }

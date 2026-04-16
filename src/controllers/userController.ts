@@ -5,7 +5,7 @@ import { User } from '../types/user';
 
 // GET user by ID
 export const getUser = async (req: Request, res: Response) => {
-  const currentUser = (req as any).user;
+  const currentUser = req.user;
   const {id} = req.params;
 
   try {
@@ -31,7 +31,7 @@ export const getUser = async (req: Request, res: Response) => {
 
 // GET users
 export const getUsers = async (req: Request, res: Response) => {
-    const user = (req as any).user;
+    const user = req.user;
 
     try {
         if (user.role === 'admin') {
@@ -54,11 +54,6 @@ export const getUsers = async (req: Request, res: Response) => {
 
 // ADD user (only admin)
 export const addUser = async (req: Request, res: Response) => {
-    const currentUser = (req as any).user;
-    if (currentUser.role !== 'admin') {
-        return res.status(403).json({ message: 'Only admins can add users' });
-    }
-
     const { name, email, password, role } = req.body;
 
     if (!name || !email || !password) {
@@ -80,7 +75,7 @@ export const addUser = async (req: Request, res: Response) => {
 
 // UPDATE user
 export const updateUser = async (req: Request, res: Response) => {
-    const currentUser = (req as any).user;
+    const currentUser = req.user;
     const { id } = req.params;
     const { name, email, password, role } = req.body;
 
@@ -126,7 +121,7 @@ export const updateUser = async (req: Request, res: Response) => {
 };
 
 export const updateUserPassword = async (req: Request, res: Response) => {
-    const currentUser = (req as any).user;
+    const currentUser = req.user;
     const { id } = req.params;
     const { old_password, new_password } = req.body;
 
@@ -157,11 +152,6 @@ export const updateUserPassword = async (req: Request, res: Response) => {
 
 // DELETE user (only admin)
 export const deleteUser = async (req: Request, res: Response) => {
-    const currentUser = (req as any).user;
-    if (currentUser.role !== 'admin') {
-        return res.status(403).json({ message: 'Only admins can delete users' });
-    }
-
     const { id } = req.params;
 
     try {

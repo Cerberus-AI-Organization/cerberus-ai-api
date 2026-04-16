@@ -1,3 +1,19 @@
+import * as cheerio from 'cheerio';
+import TurndownService from 'turndown';
+
+const turndown = new TurndownService({
+  headingStyle: 'atx',
+  codeBlockStyle: 'fenced',
+});
+
+export function htmlToMarkdown(html: string): string {
+  const $ = cheerio.load(html);
+  const main = $('main').length ? $('main') : $('article').length ? $('article') : $('body');
+  const clean = main.clone();
+  clean.find('script, style, nav, footer, header, aside, noscript, svg, img, form, button').remove();
+  const md = turndown.turndown(clean.html() || '');
+  return cleanMarkdown(md);
+}
 
 export function cleanMarkdown(md: string): string {
   let out = md;

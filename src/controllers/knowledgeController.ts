@@ -1,14 +1,9 @@
-import {Request, Response} from "express";
-import {Knowledge} from "../core/rag/Knowledge";
-import {getNodeById} from "./computeNodeController";
+import { Request, Response } from "express";
+import { Knowledge } from "../core/rag/Knowledge";
+import { getNodeById } from "./computeNodeController";
 
 export const getKnowledge = async (req: Request, res: Response) => {
   try {
-    const currentUser = (req as any).user;
-    if (currentUser.role !== 'admin') {
-      return res.status(403).json({message: 'Only admins can list knowledge sources'});
-    }
-
     const knowledge = Knowledge.instance;
     const sources = await knowledge.getAllIndexedSources()
 

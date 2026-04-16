@@ -1,16 +1,6 @@
-import { ComputeNode } from '../../types/computeNode';
-import { pool } from '../database';
 import { createNodeProvider } from '../providers';
 import { OLLAMA_EMBED_MODEL } from '../rag/DocumentEmbedder';
-
-async function getAvailableNodes(): Promise<ComputeNode[]> {
-  const res = await pool.query(
-    "SELECT * FROM compute_nodes WHERE status = 'online' ORDER BY priority DESC"
-  );
-  const nodes = res.rows;
-  if (!nodes) throw new Error('No online compute node found');
-  return nodes;
-}
+import { getAvailableNodes } from '../repositories/nodeRepository';
 
 export async function initNodes() {
   const nodes = await getAvailableNodes();

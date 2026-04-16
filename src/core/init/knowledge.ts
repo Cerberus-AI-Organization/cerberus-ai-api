@@ -3,9 +3,8 @@ import {crawlWeb} from "../rag/tools/crawler";
 import {parsePDF} from "../rag/tools/pdfparser";
 import { join } from "path";
 import {existsSync, readFileSync} from "node:fs";
-import {ComputeNode} from "../../types/computeNode";
-import {pool} from "../database";
 import {DocumentPage} from "../rag/types";
+import {getAvailableNode} from "../repositories/nodeRepository";
 
 type KnowledgeSources = {
   sites: string[],
@@ -26,15 +25,6 @@ function loadSources(): KnowledgeSources {
     console.error("Error reading sources.json:", err);
     return { sites: [], documents: [] };
   }
-}
-
-async function getAvailableNode(): Promise<ComputeNode> {
-  const res = await pool.query(
-    "SELECT * FROM compute_nodes WHERE status = 'online' ORDER BY priority DESC LIMIT 1"
-  );
-  const node = res.rows[0];
-  if (!node) throw new Error("No online compute node found");
-  return node;
 }
 
 export async function syncKnowledge() {

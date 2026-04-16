@@ -1,21 +1,17 @@
-import {Request, Response} from "express";
-import {pool} from "../core/database";
-import {checkNodeOnline} from "./computeNodeController";
-import {getNodeById} from "./computeNodeController";
+import { Request, Response } from "express";
+import { pool } from "../core/database";
 import * as JobManager from "../core/jobManager";
+import { type OllamaMessage } from "../core/aiHelpers";
+import { ComputeNode } from "../types/computeNode";
+import { ChatMode, ToolName } from "../types/constants";
+import { resolveNode } from "../middleware/resolveNode";
 import {
-  countTokens,
-  type OllamaMessage,
-  runAIStream,
-  runAISync
-} from "../core/aiHelpers";
-import {createNodeProvider} from "../core/providers";
-import {Message} from "../types/message";
-import {Knowledge} from "../core/rag/Knowledge";
-import {ComputeNode} from "../types/computeNode";
-import {DocumentRow} from "../core/rag/types";
-import {encoding_for_model} from "tiktoken";
-import {Tool, ToolCall, WebFetchResponse, WebSearchResult} from "ollama";
+  resolveChatSession,
+  generateChatTitle,
+  fetchChatHistory,
+  saveMessage,
+} from "../services/chatService";
+import { streamAIMessage } from "../services/agentService";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // HELPERS — Logging
@@ -37,281 +33,30 @@ const createLogger = (chatId: number | string) => ({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPERS — Text processing
-// ─────────────────────────────────────────────────────────────────────────────
-
-const stripThinkTags = (content: string): string => {
-  if (content.includes("</think>")) {
-    return content.split("</think>").pop()!.trim();
-  }
-  return content;
-};
-
-const extractTitle = (content: string): string => {
-  const match = content.match(/<title>([\s\S]*?)<\/title>/i);
-  const raw = match?.[1] ?? content;
-  return raw
-    .trim()
-    .replace(/["'*]/g, "")
-    .replace(/<\/?title>/gi, "")
-    .replace(/[<>]/g, "");
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// HELPERS — Node validation
-// ─────────────────────────────────────────────────────────────────────────────
-
-const validateNodeStatus = async (nodeId: number): Promise<ComputeNode> => {
-  const node = await getNodeById(nodeId);
-  const status = await checkNodeOnline(node);
-  if (status === "offline") {
-    throw new Error(`Node #${nodeId} (${node.url}) is offline`);
-  }
-  log("Node", `Node #${nodeId} is online`);
-  return node;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// CHAT — Session management
-// ─────────────────────────────────────────────────────────────────────────────
-
-const resolveChatSession = async (
-  id: string,
-  userId: number
-): Promise<{ chatId: number; isNewChat: boolean; chatObject: Record<string, unknown> }> => {
-  const chatId = Number(id);
-
-  if (chatId !== -1) {
-    const { rows } = await pool.query(
-      `SELECT 1 FROM chat_users WHERE chat_id = $1 AND user_id = $2`,
-      [chatId, userId]
-    );
-    if (rows.length === 0) {
-      throw new Error("You are not authorized to send messages in this chat");
-    }
-    log("Chat", `Resolved existing chat #${chatId} for user #${userId}`);
-    return { chatId, isNewChat: false, chatObject: rows[0] };
-  }
-
-  const chatResult = await pool.query(
-    `INSERT INTO chats (title, created_by) VALUES ($1, $2) RETURNING *`,
-    ["New Chat", userId]
-  );
-  const chat = chatResult.rows[0];
-  await pool.query(
-    `INSERT INTO chat_users (chat_id, user_id) VALUES ($1, $2)`,
-    [chat.id, userId]
-  );
-
-  log("Chat", `Created new chat #${chat.id} for user #${userId}`);
-  return { chatId: chat.id, isNewChat: true, chatObject: chat };
-};
-
-const generateChatTitle = async (
-  nodeId: number,
-  model: string,
-  content: string
-): Promise<string> => {
-  const prompt: OllamaMessage[] = [
-    { role: "system", content: "Create short title (max 5 words). Return <title>.</title>" },
-    { role: "user", content: `Create title for: [${content.slice(0, 300)}]` },
-  ];
-
-  const response = await runAISync(nodeId, model, prompt, {
-    think: false,
-    num_ctx: 512,
-    temperature: 0.8,
-  });
-  const title = extractTitle(stripThinkTags(response.content.trim()));
-
-  log("Chat", `Generated title: "${title}"`);
-  return title;
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// MESSAGES — Storage & history
-// ─────────────────────────────────────────────────────────────────────────────
-
-const fetchChatHistory = async (chatId: number): Promise<OllamaMessage[]> => {
-  const { rows } = await pool.query(
-    `SELECT * FROM messages WHERE chat_id = $1 ORDER BY id ASC`,
-    [chatId]
-  );
-  return rows.map((m) => ({
-    role: m.sender_type === "user" ? "user" : "assistant",
-    content: m.content,
-  }));
-};
-
-const saveMessage = async (
-  chatId: number,
-  userType: "user" | "ai",
-  userId: number | null,
-  content: string
-): Promise<Message> => {
-  const { rows } = await pool.query(
-    `INSERT INTO messages (chat_id, sender_type, sender_id, content)
-     VALUES ($1, $2, $3, $4) RETURNING *`,
-    [chatId, userType, userId, content]
-  );
-  log("Message", `Saved [${userType}] message #${rows[0].id} in chat #${chatId}`);
-  return rows[0];
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// RAG — Retrieval augmented generation
-// ─────────────────────────────────────────────────────────────────────────────
-
-const extractSearchQueries = (content: string): string[] => {
-  const matches = [...content.matchAll(/<query>([\s\S]*?)<\/query>/gi)];
-  return matches.length > 0
-    ? matches.map((m) => m[1].trim()).filter(Boolean)
-    : [content.trim()];
-};
-
-const generateRagQueries = async (
-  chatMessages: OllamaMessage[],
-  node: ComputeNode,
-  model: string,
-  clog: ReturnType<typeof createLogger>
-): Promise<string[]> => {
-  const context = chatMessages
-    .slice(-3)
-    .map((m) => `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`)
-    .join("\n");
-
-  const messages: OllamaMessage[] = [
-    {
-      role: "system",
-      content: `You generate semantic search queries for a vector database.
-
-Rules:
-- Focus mainly on the LAST user message.
-- Use previous messages only if necessary.
-- Queries should be natural language search phrases.
-- Include important technologies, entities, and concepts.
-- Avoid conversational filler.
-- Prefer semantic clarity over short keywords.
-
-Decide query count:
-- Simple question → 1 query
-- Complex question → up to 3 queries
-
-Return strictly in XML:
-<queries>
-  <query>text</query>
-</queries>
-
-Do not output anything outside the XML.`,
-    },
-    { role: "user", content: `Messages for summary: ${context}` },
-  ];
-
-  const num_ctx = countTokens(messages.map((m) => m.content).join("\n")) + 512;
-  const MAX_RETRIES = 3;
-
-  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-    const response = await runAISync(node.id, model, messages, {
-      think: "medium",
-      num_ctx: num_ctx,
-    }).catch((err) => {
-      clog.error("RAG", `Query generation attempt ${attempt} failed`, err);
-      return { content: "", done: true };
-    });
-
-    const queries = extractSearchQueries(stripThinkTags(response.content.trim()));
-    if (queries.length > 0 && queries.every((q) => q.length > 0)) {
-      clog.log("RAG", `Generated ${queries.length} search quer${queries.length > 1 ? "ies" : "y"}`, queries);
-      return queries;
-    }
-
-    clog.warn("RAG", `Attempt ${attempt}/${MAX_RETRIES} produced invalid queries, retrying...`);
-  }
-
-  throw new Error("Failed to generate RAG queries after multiple attempts");
-};
-
-const filterRagResults = (results: DocumentRow[]): DocumentRow[] => {
-  return results
-    .map((doc) => ({
-      ...doc,
-      chunks: doc.chunks.filter((chunk) => chunk.score >= 0.5),
-    }))
-    .filter((doc) => doc.chunks.length > 0);
-};
-
-const formatRagResults = (results: DocumentRow[]): string => {
-  return results
-    .flatMap((doc) =>
-      doc.chunks.map((chunk) => {
-        const structure = chunk.text
-          .substring(chunk.text.indexOf("STRUCTURE: ") + "STRUCTURE: ".length, chunk.text.indexOf("TEXT: "))
-          .trim();
-        const text = chunk.text
-          .substring(chunk.text.indexOf("TEXT: ") + "TEXT: ".length)
-          .trim();
-        return `---\nSOURCE: ${doc.source} (PAGE: ${chunk.page_source})\nSTRUCTURE: ${structure}\nTEXT: ${text}\n---`;
-      })
-    )
-    .join("\n\n");
-};
-
-const getRag = async (
-  chatMessages: OllamaMessage[],
-  limit: number,
-  use_advanced_rag: boolean,
-  node: ComputeNode,
-  model: string,
-  clog: ReturnType<typeof createLogger>
-): Promise<{ rag_results: DocumentRow[]; rag_formated: string }> => {
-  const queries = await generateRagQueries(chatMessages, node, model, clog);
-  const knowledge = Knowledge.instance;
-
-  const rawResults = await Promise.all(
-    queries.map((q) =>
-      use_advanced_rag
-        ? knowledge.searchWithRerank(q, node, model, limit * 2, limit)
-        : knowledge.search(q, node, limit)
-    )
-  );
-
-  const deduped = knowledge.deduplicateDocumentRows(rawResults.flat());
-  const filtered = filterRagResults(deduped);
-  const totalChunks = filtered.flatMap((d) => d.chunks).length;
-
-  clog.log("RAG", `Results — raw: ${rawResults.flat().length}, after dedup+filter: ${totalChunks} chunks`);
-
-  return {
-    rag_results: filtered,
-    rag_formated: formatRagResults(filtered),
-  };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
 // MODES — System message per mode
 // ─────────────────────────────────────────────────────────────────────────────
 
 const getSystemMessage = (
-  mode: "chat" | "malware" | "pentest",
+  mode: ChatMode,
   rag: { limit: number; use_advanced: boolean; use_web_search: boolean }
 ): OllamaMessage => {
   const toolHints =
-    "You have access to tools: use get_current_date for date/time use this tool user asks for actual data so you know what is the current date and time, " +
-    (rag.limit > 0 ? "get_knowledge to search internal documents use this tool as first source of information, " : "") +
-    (rag.use_web_search ? "web_search to find current information on the web, " : "") +
-    (rag.use_web_search ? "web_fetch to retrieve a specific web page. " : "") +
+    `You have access to tools: use ${ToolName.GET_CURRENT_DATE} for date/time use this tool user asks for actual data so you know what is the current date and time, ` +
+    (rag.limit > 0 ? `${ToolName.GET_KNOWLEDGE} to search internal documents use this tool as first source of information, ` : "") +
+    (rag.use_web_search ? `${ToolName.WEB_SEARCH} to find current information on the web, ` : "") +
+    (rag.use_web_search ? `${ToolName.WEB_FETCH} to retrieve a specific web page. ` : "") +
     "Use tools whenever they would help answer the user's question more accurately.";
 
   const base = "Your name is CerberusAI. Use user's language as output. When used something from RAG mention the source. ";
 
-  const prompts: Record<typeof mode, string> = {
-    chat:
+  const prompts: Record<ChatMode, string> = {
+    [ChatMode.CHAT]:
       base +
       "You are a smart cybersecurity assistant. Help users with any cybersecurity topic — " +
       "vulnerabilities, defenses, tools, concepts, and best practices. " +
       toolHints,
 
-    malware:
+    [ChatMode.MALWARE]:
       base +
       "You are a malware analysis advisor. Your goal is to help users detect, identify, and understand malware. " +
       "Ask clarifying questions to gather more context (symptoms, behavior, file names, hashes, network activity, etc.) " +
@@ -319,7 +64,7 @@ const getSystemMessage = (
       "Never provide working malware code — focus purely on detection, recognition, and remediation. " +
       toolHints,
 
-    pentest:
+    [ChatMode.PENTEST]:
       base +
       "You are a penetration testing advisor. Help users plan and execute ethical penetration tests. " +
       "Cover reconnaissance, scanning, exploitation, post-exploitation, and reporting phases. " +
@@ -328,313 +73,7 @@ const getSystemMessage = (
       toolHints,
   };
 
-  return { role: "system", content: prompts[mode] ?? prompts.chat };
-};
-
-// ─────────────────────────────────────────────────────────────────────────────
-// TOOLS — Definition & execution
-// ─────────────────────────────────────────────────────────────────────────────
-
-const getTools = (includeTools: string[]): Tool[] => {
-  const tools: Tool[] = [
-    {
-      type: "function",
-      function: {
-        name: "get_current_date",
-        description: "Retrieve the current date and time",
-        parameters: { type: "object", properties: {} },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "get_knowledge",
-        description: "Search internal knowledge base / documents for relevant information",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Natural language search query" },
-          },
-          required: ["query"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "web_search",
-        description: "Search the web for current information using a text query. Returns title, url, short content.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: { type: "string", description: "Search query" },
-          },
-          required: ["query"],
-        },
-      },
-    },
-    {
-      type: "function",
-      function: {
-        name: "web_fetch",
-        description: "Retrieve the full content of a specific web page by URL",
-        parameters: {
-          type: "object",
-          properties: {
-            url: { type: "string", description: "Full URL of the web page" },
-          },
-          required: ["url"],
-        },
-      },
-    },
-  ];
-
-  return tools.filter(tool => tool.function?.name && includeTools.includes(tool.function.name));
-}
-
-const getCurrentDate = (): string => {
-  return new Date().toISOString();
-};
-
-const getKnowledge = async (
-  query: string,
-  node: ComputeNode,
-  model:string,
-  limit: number,
-  advanced: boolean
-) : Promise<{ rag_results: DocumentRow[]; rag_formated: string }> => {
-  const knowledge = Knowledge.instance;
-
-  let results: DocumentRow[];
-  if (advanced) {
-    results = await knowledge.searchWithRerank(query, node, model, limit * 2, limit);
-  } else {
-    results = await knowledge.search(query, node, limit);
-  }
-
-  const filtered = filterRagResults(results);
-  const formatted = formatRagResults(filtered);
-
-  if (!formatted) {
-    return {rag_results: [], rag_formated: "No relevant documents found for the given query."};
-  }
-
-  return {rag_results: filtered, rag_formated: formatted};
-}
-
-const webSearch = async (query: string, limit: number, node: ComputeNode): Promise<WebSearchResult[]> => {
-  const provider = createNodeProvider(node);
-  return provider.webSearch(query, limit);
-}
-
-const webFetch = async (url: string, node: ComputeNode): Promise<WebFetchResponse> => {
-  const provider = createNodeProvider(node);
-  return provider.webFetch(url);
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AI — Message streaming (agent loop)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const truncateRagToFitContext = (
-  ragMessage: OllamaMessage,
-  availableTokens: number,
-  clog: ReturnType<typeof createLogger>
-): OllamaMessage => {
-  const truncatedWarning = "\n[RAG truncated due to context limit]";
-  const enc = encoding_for_model("gpt-4");
-  const encoded = enc.encode(ragMessage.content);
-  const truncated = encoded.slice(0, availableTokens - countTokens(truncatedWarning));
-  const decoded = new TextDecoder().decode(enc.decode(truncated));
-
-  clog.warn("Stream", `RAG truncated from ${encoded.length} to ${truncated.length} tokens`);
-  return { ...ragMessage, content: decoded + truncatedWarning };
-};
-
-const buildMessageContext = (
-  systemMessage: OllamaMessage,
-  ragMessage: OllamaMessage | null,
-  chatHistory: OllamaMessage[],
-  userContent: string
-): OllamaMessage[] => {
-  const messages: OllamaMessage[] = [
-    systemMessage,
-    ...chatHistory,
-    { role: "user", content: userContent },
-  ];
-  if (ragMessage) messages.splice(1, 0, ragMessage);
-  return messages;
-};
-
-const streamAIMessage = async (
-  content: string,
-  systemMessage: OllamaMessage,
-  chatHistory: OllamaMessage[],
-  rag: {limit: number, use_advanced: boolean, use_web_search: boolean},
-  node: ComputeNode,
-  model: string,
-  emit: (payload: Record<string, unknown>) => void,
-  clog: ReturnType<typeof createLogger>
-): Promise<string> => {
-  const MAX_RESPONSE_TOKENS = 1000;
-  const MAX_TOOL_ITERATIONS = 10;
-
-  const provider = createNodeProvider(node);
-
-  const neededTools = ["get_current_date"];
-  if (rag.limit > 0) {
-    neededTools.push("get_knowledge");
-  }
-  if (rag.use_web_search && provider.supportsWebSearch()) {
-    neededTools.push("web_search", "web_fetch");
-  }
-  const tools = getTools(neededTools);
-
-  let messages = buildMessageContext(systemMessage, null, chatHistory, content);
-
-  clog.log("Stream", `Starting agent loop — model: ${model}`);
-
-  let finalContent = "";
-  let iteration = 0;
-  let lastState: string | null = null;
-  let completeRag: DocumentRow[] = [];
-
-  // ── Agent loop ────────────────────────────────────────────────────────────
-  while (iteration < MAX_TOOL_ITERATIONS) {
-    iteration++;
-    const isLastIteration = iteration - 1 === MAX_TOOL_ITERATIONS;
-    clog.log("Stream", `Agent loop iteration ${iteration}`);
-
-    let thinking = "";
-    let content = "";
-    const toolCalls: ToolCall[] = [];
-
-    const completeMessagesTexts = messages.map((m) => m.content).join("\n")
-    let num_ctx = countTokens(completeMessagesTexts) + MAX_RESPONSE_TOKENS;
-
-    for await (const chunk of runAIStream(node.id, model, messages, {
-      think: true,
-      num_ctx,
-      temperature: 0.4,
-      tools: !isLastIteration ? tools : undefined,
-    })) {
-      if (chunk.thinking) {
-        thinking += chunk.thinking;
-        emit({ generated_think: chunk.thinking });
-      }
-
-      if (chunk.content) {
-        content += chunk.content;
-        emit({ generated_chunk: chunk.content });
-      }
-
-      if (chunk.tool_calls.length) {
-        toolCalls.push(...chunk.tool_calls);
-      }
-
-      const currentState = (thinking && !content && !toolCalls.length)
-        ? "thinking"
-        : "generating";
-
-      if (currentState !== lastState) {
-        lastState = currentState;
-        emit({ generation_state: currentState });
-      }
-    }
-
-    if (thinking || content || toolCalls.length) {
-      messages.push({ role: 'assistant', thinking, content, tool_calls: toolCalls })
-    }
-
-    emit({ generated_think: "\n<end-iteration />\n" });
-
-    // ── No tool calls → model is done ─────────────────────────────────────
-    if (toolCalls.length === 0) {
-      finalContent = content;
-      clog.log("Stream", `No tool calls — agent loop complete after ${iteration} iteration(s)`);
-      break;
-    }
-
-    // ── Execute tool calls ─────────────────────────────────────────────────
-    emit({ generation_state: "executing_tools" });
-    clog.log("Stream", `Executing ${toolCalls.length} tool call(s)`);
-
-    for (const call of toolCalls) {
-      if (call.function.name === "get_current_date") {
-        // ── GetCurrentDate ─────────────────────────────────────────────────────────────────────
-        const result = getCurrentDate();
-        messages.push({ role: 'tool', tool_name: call.function.name, content: result } )
-        clog.log("Stream", `Executed tool call: ${call.function.name} - ${result}`);
-      } else if (call.function.name === "get_knowledge") {
-        // ── GetKnowledge ─────────────────────────────────────────────────────────────────────
-        emit({ generation_state: "preparing_rag" });
-        const args = call.function.arguments as { query: string }
-        const result = await getKnowledge(args.query, node, model, rag.limit, rag.use_advanced);
-        messages.push({ role: 'tool', tool_name: call.function.name, content: result.rag_formated } )
-
-        if (result.rag_results.length > 0) {
-          completeRag = [...completeRag, ...result.rag_results]
-          completeRag = Knowledge.instance.deduplicateDocumentRows(completeRag);
-          emit({ rag_results: completeRag });
-        }
-        clog.log(
-          "Stream",
-          `Executed tool call: ${call.function.name} > "${args.query}" - ${
-            result.rag_results.flatMap(r => r.chunks).length
-          } chunks with average score ${
-            result.rag_results
-              .flatMap(r => r.chunks)
-              .reduce((total, chunk) => total + chunk.score, 0) /
-            result.rag_results.flatMap(r => r.chunks).length
-          }`
-        );
-        emit({ generation_state: "executing_tools" });
-      } else if (call.function.name === "web_search") {
-        // ── WebSearch ─────────────────────────────────────────────────────────────────────
-        const args = call.function.arguments as { query: string }
-        try {
-          const results = await webSearch(args.query, 5, node);
-          messages.push({role: 'tool', tool_name: call.function.name, content: JSON.stringify(results)})
-          clog.log("Stream", `Executed tool call: ${call.function.name} > "${args.query}" - ${results.length} results`);
-        } catch (err) {
-          messages.push({role: 'tool', tool_name: call.function.name, content: "Failed to search the web."})
-          clog.error("Stream", `Failed to execute tool call: ${call.function.name} - ${err}`);
-        }
-      } else if (call.function.name === "web_fetch") {
-        // ── WebFetch ─────────────────────────────────────────────────────────────────────
-        const args = call.function.arguments as { url: string }
-        try {
-          const result = await webFetch(args.url, node);
-          messages.push({role: 'tool', tool_name: call.function.name, content: JSON.stringify(result)})
-          clog.log("Stream", `Executed tool call: ${call.function.name} > "${args.url}" - ${result.title}`);
-        } catch (err) {
-          messages.push({role: 'tool', tool_name: call.function.name, content: "Failed to fetch the web page."})
-          clog.error("Stream", `Failed to execute tool call: ${call.function.name} - ${err}`);
-        }
-      } else {
-        messages.push({ role: 'tool', tool_name: call.function.name, content: 'Unknown tool' } )
-        clog.warn("Stream", `Unknown tool call: ${call.function.name}`);
-      }
-    }
-
-    emit({ generation_state: "generating" });
-  }
-
-  if (iteration >= MAX_TOOL_ITERATIONS && !finalContent) {
-    clog.warn("Stream", `Agent loop hit max iterations (${MAX_TOOL_ITERATIONS}), using last content`);
-    finalContent = messages
-      .filter((m) => m.role === "assistant" && m.content)
-      .map((m) => m.content)
-      .pop() ?? "Failed to generate a complete response.";
-  }
-
-  if (finalContent.trim() === "") {
-    clog.warn("Stream", "Empty response received from model");
-    finalContent = "Failed to generate message content. Please try again later.";
-  }
-
-  clog.log("Stream", `Agent loop done — ${finalContent.length} chars, ${iteration} iteration(s)`);
-  return finalContent;
+  return { role: "system", content: prompts[mode] ?? prompts[ChatMode.CHAT] };
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -644,7 +83,7 @@ const streamAIMessage = async (
 export const createChat = async (req: Request, res: Response) => {
   try {
     const { title } = req.body;
-    const user = (req as any).user;
+    const user = req.user;
 
     const { rows } = await pool.query(
       `INSERT INTO chats (title, created_by) VALUES ($1, $2) RETURNING *`,
@@ -667,7 +106,7 @@ export const createChat = async (req: Request, res: Response) => {
 
 export const getUserChats = async (req: Request, res: Response) => {
   try {
-    const user = (req as any).user;
+    const user = req.user;
 
     const { rows } = await pool.query(
       `SELECT c.* FROM chats c
@@ -688,7 +127,7 @@ export const getUserChats = async (req: Request, res: Response) => {
 export const getChatMessages = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const user = (req as any).user;
+    const user = req.user;
 
     const { rows: access } = await pool.query(
       `SELECT * FROM chat_users WHERE chat_id = $1 AND user_id = $2`,
@@ -719,8 +158,8 @@ const runGenerationJob = async (
   isNewChat: boolean,
   node: ComputeNode,
   model: string,
-  mode: "chat" | "malware" | "pentest",
-  rag: {limit: number, use_advanced: boolean, use_web_search: boolean},
+  mode: ChatMode,
+  rag: { limit: number; use_advanced: boolean; use_web_search: boolean },
   content: string,
   userId: number,
 ): Promise<void> => {
@@ -728,7 +167,7 @@ const runGenerationJob = async (
   const emit = (payload: Record<string, unknown>) => JobManager.appendChunk(jobId, payload);
 
   emit({ generation_state: "thinking" });
-  let titleJob: Promise<string>|null = null;
+  let titleJob: Promise<string> | null = null;
 
   if (isNewChat) {
     titleJob = generateChatTitle(node.id, model, content);
@@ -759,17 +198,19 @@ const runGenerationJob = async (
 export const postChatMessage = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { node_id, model, mode, rag, content } = req.body as {
-    node_id: number,
-    model: string,
-    mode: "chat" | "malware" | "pentest",
-    rag: {limit: number, use_advanced: boolean, use_web_search: boolean},
-    content: string};
-  const user = (req as any).user;
+    node_id: number;
+    model: string;
+    mode: ChatMode;
+    rag: { limit: number; use_advanced: boolean; use_web_search: boolean };
+    content: string;
+  };
+  const user = req.user;
 
   try {
     log("Chat", `Incoming message — chat: ${id}, model: ${model}, user: #${user.id}`);
 
-    const node = await validateNodeStatus(Number(node_id));
+    const { node } = await resolveNode(Number(node_id));
+    log("Node", `Node #${node_id} is online`);
 
     const { chatId, isNewChat, chatObject } = await resolveChatSession(id, user.id);
 
@@ -797,7 +238,7 @@ export const postChatMessage = async (req: Request, res: Response) => {
 export const deleteChat = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const user = (req as any).user;
+    const user = req.user;
 
     const { rows } = await pool.query(`SELECT * FROM chats WHERE id = $1`, [id]);
     const chat = rows[0];

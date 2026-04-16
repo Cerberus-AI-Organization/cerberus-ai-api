@@ -44,11 +44,7 @@ export async function refreshNodeStatuses(): Promise<boolean> {
 
 export const addComputeNode = async (req: Request, res: Response) => {
   const { hostname, url, api_type = 'ollama', api_key, priority, max_ctx, max_layers_on_gpu } = req.body;
-  const user = (req as any).user;
-
-  if (user.role !== 'admin') {
-    return res.status(403).json({ message: 'Only admins can add compute nodes' });
-  }
+  const user = req.user;
 
   try {
     // Build a temporary node object for the online check
@@ -93,11 +89,6 @@ export const addComputeNode = async (req: Request, res: Response) => {
 export const updateComputeNode = async (req: Request, res: Response) => {
   const { id } = req.params;
   const { hostname, url, api_type, api_key, priority, max_ctx, max_layers_on_gpu } = req.body;
-  const user = (req as any).user;
-
-  if (user.role !== 'admin') {
-    return res.status(403).json({ message: 'Only admins can update compute nodes' });
-  }
 
   try {
     const tempNode: ComputeNode = {
@@ -138,7 +129,7 @@ export const updateComputeNode = async (req: Request, res: Response) => {
 };
 
 export const getComputeNodes = async (req: Request, res: Response) => {
-  const user = (req as any).user;
+  const user = req.user;
 
   try {
     if (user.role === 'admin') {
@@ -158,11 +149,6 @@ export const getComputeNodes = async (req: Request, res: Response) => {
 
 export const deleteComputeNode = async (req: Request, res: Response) => {
   const { id } = req.params;
-  const user = (req as any).user;
-
-  if (user.role !== 'admin') {
-    return res.status(403).json({ message: 'Only admins can delete compute nodes' });
-  }
 
   try {
     const result = await pool.query('DELETE FROM compute_nodes WHERE id=$1', [id]);

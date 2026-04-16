@@ -1,21 +1,9 @@
 import { Request, Response } from 'express';
-import {checkNodeOnline, getNodeById} from './computeNodeController';
-import { createNodeProvider } from '../core/providers';
 import { runAISync } from '../core/aiHelpers';
 
 export const listModels = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
-    const node = await getNodeById(Number(id));
-
-    const status = await checkNodeOnline(node);
-    if (status === 'offline') {
-      return res.status(500).json({ error: 'Node is offline' });
-    }
-
-    const provider = createNodeProvider(node);
-    const models = await provider.listModels();
-
+    const models = await req.nodeProvider.listModels();
     res.json(models.filter(m => !m.name.toLowerCase().includes('embed')));
   } catch (err: any) {
     res.status(500).json({ error: err.message });
@@ -23,25 +11,13 @@ export const listModels = async (req: Request, res: Response) => {
 };
 
 export const pullModel = async (req: Request, res: Response) => {
-  const currentUser = (req as any).user;
-
-  if (currentUser.role !== 'admin') {
-    return res.status(403).json({ message: 'Only admins can pull ollama models' });
-  }
-
+  const currentUser = req.user;
   console.log(`User [${currentUser.id}](${currentUser.role}) pulling model [${req.body.name}] on node [${req.params.id}]`);
 
   try {
-    const { id } = req.params;
     const { name } = req.body;
-    const node = await getNodeById(Number(id));
+    const provider = req.nodeProvider;
 
-    const status = await checkNodeOnline(node);
-    if (status === 'offline') {
-      return res.status(500).json({ error: 'Node is offline' });
-    }
-
-    const provider = createNodeProvider(node);
     if (!provider.canManageModels()) {
       return res.status(501).json({ error: 'Model management is not supported for this node type' });
     }
@@ -63,24 +39,14 @@ export const pullModel = async (req: Request, res: Response) => {
 };
 
 export const deleteModel = async (req: Request, res: Response) => {
-  const currentUser = (req as any).user;
-
-  if (currentUser.role !== 'admin') {
-    return res.status(403).json({ message: 'Only admins can delete ollama models' });
-  }
-
+  const currentUser = req.user;
   console.log(`User [${currentUser.id}](${currentUser.role}) deleting model [${req.params.name}] on node [${req.params.id}]`);
 
   try {
-    const { id, name } = req.params;
-    const node = await getNodeById(Number(id));
+    const { name } = req.params;
+    const node = req.resolvedNode;
+    const provider = req.nodeProvider;
 
-    const status = await checkNodeOnline(node);
-    if (status === 'offline') {
-      return res.status(500).json({ error: 'Node is offline' });
-    }
-
-    const provider = createNodeProvider(node);
     if (!provider.canManageModels()) {
       return res.status(501).json({ error: 'Model management is not supported for this node type' });
     }
@@ -95,21 +61,10 @@ export const deleteModel = async (req: Request, res: Response) => {
 };
 
 export const stopModel = async (req: Request, res: Response) => {
-  const currentUser = (req as any).user;
-  if (currentUser.role !== 'admin') {
-    return res.status(403).json({ message: 'Only admins can stop ollama models' });
-  }
-
   try {
-    const { id } = req.params;
-    const node = await getNodeById(Number(id));
+    const node = req.resolvedNode;
+    const provider = req.nodeProvider;
 
-    const status = await checkNodeOnline(node);
-    if (status === 'offline') {
-      return res.status(500).json({ error: 'Node is offline' });
-    }
-
-    const provider = createNodeProvider(node);
     if (!provider.canManageModels()) {
       return res.status(501).json({ error: 'Stop model is not supported for this node type' });
     }
@@ -123,16 +78,10 @@ export const stopModel = async (req: Request, res: Response) => {
 
 export const preloadModel = async (req: Request, res: Response) => {
   try {
-    const { id } = req.params;
     const { model } = req.body;
-    const node = await getNodeById(Number(id));
+    const node = req.resolvedNode;
+    const provider = req.nodeProvider;
 
-    const status = await checkNodeOnline(node);
-    if (status === 'offline') {
-      return res.status(500).json({ error: 'Node is offline' });
-    }
-
-    const provider = createNodeProvider(node);
     if (!provider.canManageModels()) {
       return res.status(501).json({ error: 'Preload is not supported for this node type' });
     }

@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import '../types/express'; // ensures global Express.Request augmentation is loaded
 
 const JWT_SECRET = process.env.JWT_SECRET!;
 
@@ -16,7 +17,7 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
             return res.status(403).json({ message: 'Invalid token' });
         }
 
-        (req as any).user = user;
+        req.user = user as { id: number; role: string };
         next();
     });
 };

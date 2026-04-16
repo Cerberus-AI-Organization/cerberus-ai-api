@@ -1,13 +1,7 @@
 import fetch from "node-fetch";
 import * as cheerio from "cheerio";
 import {parsePDFFromUrl} from "./pdfparser";
-import TurndownService from "turndown";
-import {cleanMarkdown} from "./markdownUtils";
-
-const turndown = new TurndownService({
-  headingStyle: "atx",
-  codeBlockStyle: "fenced",
-});
+import {htmlToMarkdown} from "./markdownUtils";
 
 interface CrawlResult {
   url: string;
@@ -41,19 +35,13 @@ export async function* crawlWeb(
       }
 
       const html = await res.text();
-      const $ = cheerio.load(html);
-
-      const main = $("main").length ? $("main") : $("article").length ? $("article") : $("body");
-      const cleanHtml = main.clone();
-      cleanHtml.find("script, style, nav, footer, header, aside, noscript, svg, img, form, button").remove();
-
-      let markdown = turndown.turndown(cleanHtml.html() || "");
-      markdown = cleanMarkdown(markdown);
+      const markdown = htmlToMarkdown(html);
 
       yield { url, text: markdown };  // ← yield, pak zahodíme HTML z paměti
 
       if (depth === 0) continue;
 
+      const $ = cheerio.load(html);
       const baseUrl = new URL(url);
       let count = 0;
 

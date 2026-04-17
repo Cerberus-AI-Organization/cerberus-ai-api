@@ -56,15 +56,22 @@ async function scheduleKnowledgeSync() {
 
   console.log(`📅 Knowledge sync scheduled at hours: ${KNOWLEDGE_SYNC_HOURS.join(', ')}`);
 
+  const now = new Date();
+  const currentHour = now.getHours();
+  const initialKey = `${now.toDateString()}-${currentHour}`;
+
   const isEmpty = await Knowledge.instance.isEmpty();
   if (isEmpty) {
     console.info('📭 No knowledge found, running initial sync...');
+    runKnowledgeSync();
+  } else if (KNOWLEDGE_SYNC_HOURS.includes(currentHour)) {
+    console.info(`🔄 Knowledge sync triggered on startup at ${currentHour}:${now.getMinutes()} (scheduled hour matched)`);
     runKnowledgeSync();
   } else {
     console.info('📚 Knowledge already exists, skipping initial sync');
   }
 
-  let lastTriggeredKey = '';
+  let lastTriggeredKey = KNOWLEDGE_SYNC_HOURS.includes(currentHour) ? initialKey : '';
   setInterval(() => {
     const now = new Date();
     const hour = now.getHours();

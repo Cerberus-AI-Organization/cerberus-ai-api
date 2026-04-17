@@ -70,9 +70,9 @@ async function scheduleKnowledgeSync() {
     const hour = now.getHours();
     const key = `${now.toDateString()}-${hour}`;
 
-    if (now.getMinutes() === 0 && KNOWLEDGE_SYNC_HOURS.includes(hour) && lastTriggeredKey !== key) {
+    if (KNOWLEDGE_SYNC_HOURS.includes(hour) && lastTriggeredKey !== key) {
       lastTriggeredKey = key;
-      console.info(`🔄 Knowledge sync triggered at ${hour}:00`);
+      console.info(`🔄 Knowledge sync triggered at ${hour}:${now.getMinutes()}`);
       runKnowledgeSync();
     }
   }, 60 * 1000);

@@ -19,6 +19,13 @@ import apiRoutes from "./routes/apiRoutes";
 
 dotenv.config();
 
+process.on('unhandledRejection', (reason: any) => {
+  console.error('❌ Unhandled promise rejection:', reason?.message ?? reason, reason?.stack);
+});
+process.on('uncaughtException', (err: Error) => {
+  console.error('❌ Uncaught exception:', err.message, err.stack);
+});
+
 if (!process.env.JWT_SECRET) {
   throw new Error('⛔ JWT_SECRET is not set in .env');
 }

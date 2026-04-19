@@ -170,7 +170,10 @@ const runGenerationJob = async (
   let titleJob: Promise<string> | null = null;
 
   if (isNewChat) {
-    titleJob = generateChatTitle(node.id, model, content);
+    titleJob = generateChatTitle(node.id, model, content).catch((err: any) => {
+      clog.log("Chat", `Title generation failed: ${err.message}`);
+      return "";
+    });
   }
 
   const systemMessage: OllamaMessage = getSystemMessage(mode, rag);
@@ -186,9 +189,11 @@ const runGenerationJob = async (
 
   if (titleJob) {
     const title = await titleJob;
-    await pool.query(`UPDATE chats SET title = $1 WHERE id = $2`, [title, chatId]);
-    chatObject.title = title;
-    emit({ chat: chatObject });
+    if (title) {
+      await pool.query(`UPDATE chats SET title = $1 WHERE id = $2`, [title, chatId]);
+      chatObject.title = title;
+      emit({ chat: chatObject });
+    }
   }
 
   clog.log("Chat", `Generation job ${jobId} complete`);
